@@ -174,3 +174,45 @@ An OpenAI key was added to `.env` (ignored by git). `npm run analyze` on the sav
   now apply after the LLM too.
 - Morgan R. Olsen's contact was read by the LLM and passed the check against the page text.
 - The strict JSON schema was accepted by `gpt-4o-mini`. Cost of the check: $0.0003.
+
+## Step 11 · Evaluation
+
+`npm run eval` against [eval/must-find.json](../eval/must-find.json), on the latest crawl that
+started from each home page (depth 3, 300 pages):
+
+| Site | Must-find, rules only | Must-find, with LLM | Precision@10 |
+|---|---|---|---|
+| Ann Arbor | 3/3 | 3/3 | 10/10 |
+| Boerne ISD | 3/3 | 3/3 | 10/10 |
+| ASU | 3/3 | 3/3 | 8/10 |
+| Bozeman | blocked, reported | blocked, reported | - |
+
+Both columns come from the same fetched pages: the crawl ran once with the LLM on, then
+`npm run rescore` re-ranked it from disk with rules only, and again with the LLM from cache.
+
+Two more fixes came out of reading the LLM results:
+- With the LLM on, an older ACFR the LLM confirmed (0.84) outranked the newer one the rules were
+  already sure about (0.73), because they were on two scales. Links the rules are sure about
+  now count as confirmed and use the same scale. Test added that failed before the fix.
+- The LLM confirmed "FY27 Budget Responses" and an RFP budget spreadsheet as budgets; the
+  rules' discount for papers about a document now applies after the LLM too, and RFP, bid and
+  addendum count as such papers.
+
+LLM spend for the whole night: one crawl of the three sites, $0.025, plus checks under a cent.
+Every rescore came from the cache (183 cached answers). `LLM_MAX_USD_PER_CRAWL` (default $0.50)
+caps a crawl; a test checks that the LLM stops at the cap and the crawl finishes on rules.
+
+## Step 12 · README
+
+The README covers setup, how ranking works, API usage with real responses, the live view, the
+data model, tests, known limits and the scale-out design. `docker compose build app` builds the
+image; a container started from it answered `/health`, served the OpenAPI document (8 paths)
+and the start page.
+
+## Not done
+
+- **Step 13, if time:** a headless browser for pages drawn entirely by scripts. Not needed for
+  the test sites: ASU's menu was bypassed through the footer and page JSON, and ClearGov's
+  budget is found as a link. Script-built pages are flagged `needs_browser`.
+- **GitHub:** creating the public repository was refused by the permission system on this
+  machine, so the code is committed locally only.

@@ -24,7 +24,32 @@ The design behind it, including the version for millions of pages a day, is in
 
 ## Results on the test sites
 
-RESULTS_TABLE
+Each site crawled from its home page, depth 3, 300 pages. The must-find list
+([eval/must-find.json](eval/must-find.json)) was built by hand before the crawler ran. A target
+counts as found when it is in the top 10 of its type. Run it yourself with `npm run eval`.
+
+| Site | Crawl | Must-find (rules only) | Must-find (with LLM) | Precision@10, documents |
+|---|---|---|---|---|
+| Ann Arbor (a2gov.org) | 281 pages | 3/3 | 3/3 | 10/10 |
+| Boerne ISD (boerneisd.net) | 285 pages | 3/3 | 3/3 | 10/10 |
+| Arizona State University (asu.edu) | 293 pages | 3/3 | 3/3 | 8/10 |
+| Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - |
+
+What it found, first in each list:
+
+| Site | ACFR | Budget | Finance contact |
+|---|---|---|---|
+| Ann Arbor | FY2025 ACFR (govstack CDN) | FY2026 adopted budget book; FY2027 on ClearGov | Marti Praschan, Chief Financial Officer, mpraschan@a2gov.org |
+| Boerne ISD | FY2025 Annual Financial Report (file host) | 2026-27 adopted budget, PDF and Excel | Wesley Scott, Chief Financial Officer, wesley.scott@boerneisd.net |
+| ASU | 2026 annual comprehensive financial report | FY2027 operating budget (Board of Regents SharePoint) | Morgan R. Olsen, Executive Vice President, Treasurer and CFO |
+| Bozeman | the site answers 403 to every automated request, including robots.txt; reported, not bypassed | | |
+
+Two details worth knowing: ASU's finance site is reached without a browser through a footer link
+called "Jobs" (the host name `cfo.asu.edu` carries the signal), and ASU's CFO is read from JSON
+embedded in the page, because the card is drawn by a script.
+
+The LLM run of all three sites cost **$0.025** with `gpt-4o-mini`. Full details:
+[eval/results.md](eval/results.md) (with LLM) and [eval/results-rules-only.md](eval/results-rules-only.md).
 
 ---
 
@@ -206,7 +231,86 @@ Interactive docs: http://localhost:3000/docs (OpenAPI JSON at `/docs/json`).
 
 ### Examples
 
-API_EXAMPLES
+Start a crawl, then follow it:
+
+```bash
+curl -X POST http://localhost:3000/v1/crawls   -H 'content-type: application/json' -H 'Idempotency-Key: a2gov-1'   -d '{"url": "https://www.a2gov.org/", "max_depth": 3, "page_budget": 300}'
+# 202 {"id": "31c28e87-...", "status": "queued", "links": {"live": "/live/31c28e87-...", ...}}
+
+curl http://localhost:3000/v1/crawls/31c28e87-...          # status and counters
+open http://localhost:3000/live/31c28e87-...               # watch it
+```
+
+The best documents of a site's latest crawl (real response, trimmed):
+
+```bash
+curl 'http://localhost:3000/v1/links?host=a2gov.org&type=document&min_score=0.7&limit=1'
+```
+
+```json
+{
+  "crawl": { "id": "31c28e87-20b4-463e-951d-9a33c7063478", "seed_url": "https://www.a2gov.org/", "status": "done" },
+  "data": [
+    {
+      "id": 12,
+      "url": "https://www.a2gov.org/media/je4nrvnr/fy26-budget-book.pdf",
+      "label": "Adopted Budget FY2026",
+      "type": "document",
+      "file_type": "pdf",
+      "doc_type": "budget",
+      "fiscal_year": 2026,
+      "is_draft": false,
+      "target_score": 1,
+      "matched_keywords": ["budget"],
+      "decided_by": "rules",
+      "reason": "'budget' in the link text (+0.35); 'budget' in the URL or file name (+0.25); heading 'Annual Budgets' names it (+0.15); PDF document (+0.15); ...",
+      "sources": [
+        {
+          "page": "https://www.a2gov.org/finance-and-administrative-services/financial-reporting/",
+          "anchor_text": "Adopted Budget FY2026",
+          "section_heading": "Annual Budgets",
+          "context": "The annual budget is the City's plan for providing services to the community during the fiscal year..."
+        }
+      ]
+    }
+  ],
+  "next_cursor": "eyJzIjoxLCJmIjoyMDI2LCJpZCI6MTJ9"
+}
+```
+
+Contacts, each with the text it was checked against:
+
+```bash
+curl 'http://localhost:3000/v1/contacts?host=boerneisd.net&limit=1'
+```
+
+```json
+{
+  "data": [
+    {
+      "name": "Wesley Scott",
+      "title": "Chief Financial Officer",
+      "email": "wesley.scott@boerneisd.net",
+      "score": 0.9,
+      "source_url": "https://www.boerneisd.net/244573_3",
+      "source_snippet": "Wesley Scott, CPA, RTSBA
+Chief Financial Officer
+Email Mr. Scott
+Email: wesley.scott@boerneisd.net",
+      "decided_by": "llm"
+    }
+  ]
+}
+```
+
+Other useful queries:
+
+```bash
+curl 'http://localhost:3000/v1/links?host=asu.edu&doc_type=acfr&limit=3'       # ASU's ACFRs, newest first
+curl 'http://localhost:3000/v1/links?host=boerneisd.net&fiscal_year=2027'       # everything for FY2027
+curl 'http://localhost:3000/v1/links?host=a2gov.org&q=single+audit'             # full-text search
+curl 'http://localhost:3000/v1/crawls/<id>/pages?status=skipped'                # what was skipped, and why
+```
 
 Errors always look like this:
 
@@ -249,7 +353,7 @@ raw pages are gzip files on disk keyed by URL hash, outside the database.
 
 ## Tests
 
-`npm test` runs 90+ tests:
+`npm test` runs 100+ tests:
 
 - **Unit:** URL normalization and scope, trap guards, the RFC 9309 examples, the fetcher (redirects,
   loops, size cap, timeouts, retry rules), keyword matching, fiscal years, rules scoring and

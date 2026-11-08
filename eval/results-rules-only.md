@@ -1,4 +1,4 @@
-# Evaluation · 2026-11-08 11:02 UTC
+# Evaluation · 2026-11-08 11:13 UTC
 
 | Site | Crawl | Must-find | Precision@10 (documents) | Links decided by the LLM |
 |---|---|---|---|---|
@@ -14,15 +14,15 @@ Precision@10 counts how many of the ten best-scored documents match a hand-writt
 ## Ann Arbor
 
 - found: ACFR FY2025 (rank 1 of 24 acfr documents, score 0.73)
-- found: Adopted budget FY2027 (ClearGov) or FY2026 (PDF) (rank 1 of 202 budget documents, score 0.95)
+- found: Adopted budget FY2027 (ClearGov) or FY2026 (PDF) (rank 1 of 201 budget documents, score 0.95)
 - found: Chief Financial Officer (Marti Praschan · Chief Financial Officer · mpraschan@a2gov.org · score 0.95)
 
 Top 5 documents:
 - 0.95 budget 2026 Adopted Budget FY2026 <https://www.a2gov.org/media/je4nrvnr/fy26-budget-book.pdf>
 - 0.87 budget 2025 Adopted Budget FY2025 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/swaherth/budget-book-fy25.pdf>
 - 0.80 budget 2024 Adopted Budget FY2024 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/32hbju5e/budget-book-fy24-for-web.pdf>
-- 0.78 budget  Budget Spreadsheet <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/2bqfxswe/rfp_22-78_budgetspreadsheet.xlsm>
 - 0.73 acfr 2025 Fiscal Year 2025 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/v2abzw2u/city-of-ann-arbor-6-30-25-acfr-final.pdf>
+- 0.72 budget 2023 Adopted Budget FY2023 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/o4vouf2j/budget-book-for-web-fy23.pdf>
 
 ## Boerne ISD
 
