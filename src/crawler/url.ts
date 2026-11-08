@@ -41,13 +41,17 @@ export function urlHash(url: string): Buffer {
   return createHash("sha256").update(url).digest();
 }
 
+/** Host with the port when it is not the default one: robots.txt and politeness are per host:port. */
 export function hostOf(url: string): string {
-  return new URL(url).hostname;
+  return new URL(url).host;
 }
+
+const hostname = (host: string) => host.replace(/:\d+$/, "");
 
 /** Registrable domain (asu.edu for cfo.asu.edu). Falls back to the host for IPs and localhost. */
 export function registrableDomain(host: string): string {
-  return getDomain(host, { allowPrivateDomains: false }) ?? host;
+  const name = hostname(host);
+  return getDomain(name, { allowPrivateDomains: false }) ?? name;
 }
 
 export interface CrawlScope {
@@ -70,7 +74,7 @@ export function inScope(url: string, scope: CrawlScope): boolean {
 export function isEntityNamedHost(host: string, seedDomain: string): boolean {
   const label = seedDomain.split(".")[0] ?? "";
   if (label.length < 4) return false;
-  const sub = getSubdomain(host) ?? "";
+  const sub = getSubdomain(hostname(host)) ?? "";
   return sub.split(".").includes(label);
 }
 

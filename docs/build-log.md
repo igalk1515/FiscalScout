@@ -76,3 +76,29 @@ before the list as context, not their neighbour's link.
 - Not yet run against the real API: there is no key on this machine.
 
 `npm test`: 62 tests pass.
+
+## Steps 7 and 9 · Storage and the crawler
+
+Built together, because the crawler is what writes the storage. `test/crawler.test.ts` runs a
+real crawl against a fake city site served locally, on the test database:
+
+- robots.txt: the disallowed page is skipped and never requested; robots.txt is fetched once.
+- Politeness: with 3 workers, the site never saw two requests at once (`maxActive = 1`).
+- Traps: the far-future calendar and the repeating path are recorded as skipped traps and never
+  requested. Social links are not even queued.
+- Retries: a 503 is retried and succeeds on the second attempt; a 404 fails once, no retry.
+- Redirects: followed, final URL stored.
+- Ranking with provenance: the ACFR (FY2025, heading "Annual Comprehensive Financial Report
+  (ACFR)") and the FY2026 budget score at least 0.7, joined to the page and heading they came from.
+- An opaque URL (`/DocumentCenter/View/77`) is learned to be a PDF when fetched.
+- Contact: Jane Doe, Finance Director, jdoe@example.gov.
+- Events: one `page.fetched` per page done, `crawl.started`, `crawl.done`.
+- A second crawl of the same site adds no rows to `links` and keeps its own `link_scores`.
+- An idempotency key returns the same crawl.
+- A site that answers 403 is marked `blocked` after two requests (robots.txt and the start
+  page), with the reason, and is not bypassed.
+
+Bug found by the tests: the robots.txt cache keyed hosts without the port, so two servers on
+127.0.0.1 shared rules. Hosts now include a non-default port, as RFC 9309 expects.
+
+`npm test`: 75 tests pass.

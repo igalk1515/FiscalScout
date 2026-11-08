@@ -22,6 +22,8 @@ export interface LinkScore {
   matchedKeywords: string[];
   reason: string;
   noise: boolean;
+  /** Set to "llm" when the LLM tier replaced the rules score. */
+  decidedBy?: "rules" | "llm";
 }
 
 export interface ScoreContext {
@@ -35,7 +37,7 @@ export interface ScoreContext {
   now?: Date;
 }
 
-const SOCIAL_HOSTS =
+export const SOCIAL_HOSTS =
   /(^|\.)(facebook|twitter|x|instagram|youtube|youtu|linkedin|tiktok|nextdoor|flickr|pinterest|threads|vimeo|snapchat)\.(com|be|net)$/i;
 const NOISE_WORDS =
   /(?<![a-z])(log ?in|sign ?in|sign ?up|register|subscribe|translate|privacy|cookies?|accessibility statement|skip to|print|share|calendar|events?|news|press releases?|weather|parking tickets?)(?![a-z])/i;

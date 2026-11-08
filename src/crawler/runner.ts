@@ -1,0 +1,490 @@
+import { createHash } from "node:crypto";
+import type { Db } from "../db/client.js";
+import type { EventBus } from "../events.js";
+import { findContacts } from "../ranking/contacts.js";
+import { compileKeywords, type CompiledGroup } from "../ranking/keywords.js";
+import type { CallInfo, LlmClient } from "../ranking/llm.js";
+import { RANKER_VERSION, scoreLink, SOCIAL_HOSTS, UNSURE_HIGH, UNSURE_LOW, type LinkScore } from "../ranking/rules.js";
+import * as repo from "../store/repo.js";
+import { extractPage, parseHtml, type LinkCandidate } from "./extract.js";
+import { fetchUrl, isRetryable } from "./fetcher.js";
+import { saveRaw } from "./rawstore.js";
+import { crawlDelayMs, fetchRobots, isAllowed, policyFromResponse, robotsUrlFor, type RobotsPolicy } from "./robots.js";
+import {
+  type CrawlScope,
+  fileTypeFromContentType,
+  hostOf,
+  inScope,
+  isEntityNamedHost,
+  normalizeUrl,
+  trapReason,
+  urlHash,
+} from "./url.js";
+
+export interface Logger {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
+export interface RunnerOptions {
+  db: Db;
+  events: EventBus;
+  llm: LlmClient;
+  rawDir: string;
+  userAgent: string;
+  robotsToken: string;
+  workers: number;
+  minDelayMs: number;
+  log: Logger;
+  /** Share of claims that pick a random queued URL instead of the best one. */
+  exploreRate?: number;
+  maxAttempts?: number;
+}
+
+interface CrawlState {
+  crawl: repo.CrawlRow;
+  groups: CompiledGroup[];
+  scope: CrawlScope;
+  claimed: number;
+  contentHashes: Set<string>;
+  seedOutcome: { status: number; reason: string } | null;
+  llmCalls: number;
+  llmCost: number;
+}
+
+const ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const BLOCKING_STATUSES = new Set([401, 403, 429, 451, 503]);
+
+/**
+ * Runs crawls. Each crawl is a set of async workers that claim URLs from the frontier table,
+ * fetch them politely, rank what they find and queue new links. Workers only share the database,
+ * so the same code runs as one process or many.
+ */
+export class CrawlRunner {
+  private running = new Map<string, Promise<void>>();
+  private robots = new Map<string, { policy: RobotsPolicy; at: number }>();
+  private stopping = false;
+
+  constructor(private o: RunnerOptions) {}
+
+  /** Starts a crawl if it is not already running. Resolves when it finishes. */
+  start(crawlId: string): Promise<void> {
+    const existing = this.running.get(crawlId);
+    if (existing) return existing;
+    const p = this.run(crawlId)
+      .catch(async (err) => {
+        this.o.log.error({ err, crawlId }, "crawl failed");
+        await repo.setCrawlStatus(this.o.db, crawlId, "failed", (err as Error).message).catch(() => {});
+        await this.o.events.emit(crawlId, "crawl.failed", { error: (err as Error).message }).catch(() => {});
+      })
+      .finally(() => this.running.delete(crawlId));
+    this.running.set(crawlId, p);
+    return p;
+  }
+
+  /** After a restart: continue crawls that were queued or running. */
+  async resume(): Promise<void> {
+    const r = await this.o.db.query<{ id: string }>("select id from crawls where status in ('queued', 'running') order by created_at");
+    for (const { id } of r.rows) void this.start(id);
+  }
+
+  isRunning(crawlId: string) {
+    return this.running.has(crawlId);
+  }
+
+  async stop(): Promise<void> {
+    this.stopping = true;
+    await Promise.allSettled([...this.running.values()]);
+  }
+
+  private async run(crawlId: string) {
+    const { db, events } = this.o;
+    const crawl = await repo.getCrawl(db, crawlId);
+    if (!crawl || ["done", "blocked", "failed"].includes(crawl.status)) return;
+    await repo.resetStale(db, crawlId);
+    await repo.setCrawlStatus(db, crawlId, "running");
+    const state: CrawlState = {
+      crawl,
+      groups: compileKeywords(crawl.keywords),
+      scope: { domain: crawl.scope_domain, extraHosts: new Set(crawl.extra_hosts) },
+      claimed: crawl.pages_fetched + crawl.pages_failed,
+      contentHashes: new Set(),
+      seedOutcome: null,
+      llmCalls: 0,
+      llmCost: 0,
+    };
+    await events.emit(crawlId, "crawl.started", {
+      seed: crawl.seed_url,
+      max_depth: crawl.max_depth,
+      page_budget: crawl.page_budget,
+      keywords: Object.keys(crawl.keywords),
+      llm: this.o.llm.enabled ? this.o.llm.model : null,
+    });
+
+    const ticker = setInterval(() => void this.emitStats(state), 1500);
+    try {
+      await Promise.all(Array.from({ length: this.o.workers }, () => this.worker(state)));
+    } finally {
+      clearInterval(ticker);
+    }
+
+    const budgetHit = state.claimed >= crawl.page_budget;
+    if (budgetHit) await repo.skipQueued(db, crawlId, "page budget reached");
+    let status: repo.CrawlStatus = "done";
+    let detail: string | null = budgetHit ? `stopped at the page budget of ${crawl.page_budget}` : null;
+    if (state.seedOutcome) {
+      const { status: code, reason } = state.seedOutcome;
+      if (reason === "robots.txt" || BLOCKING_STATUSES.has(code)) {
+        status = "blocked";
+        detail =
+          reason === "robots.txt"
+            ? "robots.txt does not allow this bot on the start page"
+            : `the site refused automated requests (HTTP ${code}); not bypassed`;
+      } else {
+        status = "failed";
+        detail = `the start page could not be fetched: ${reason}`;
+      }
+    }
+    await this.emitStats(state);
+    await repo.setCrawlStatus(db, crawlId, status, detail);
+    await events.emit(crawlId, `crawl.${status}`, { detail, pages: state.claimed });
+  }
+
+  private async worker(state: CrawlState) {
+    const { db } = this.o;
+    const id = state.crawl.id;
+    while (!this.stopping) {
+      if (state.claimed >= state.crawl.page_budget) return;
+      const explore = Math.random() < (this.o.exploreRate ?? 0.1);
+      const item = await repo.claimNext(db, id, explore);
+      if (!item) {
+        const pending = await repo.pendingCounts(db, id);
+        if (pending.queued === 0 && pending.fetching === 0) return;
+        await sleep(150);
+        continue;
+      }
+      state.claimed++;
+      try {
+        await this.process(state, item);
+      } catch (err) {
+        this.o.log.error({ err, url: item.url }, "page failed");
+        await repo.finishItem(db, id, item.url_hash, "failed", null, `internal error: ${(err as Error).message}`.slice(0, 300));
+        await repo.releaseHost(db, item.host, this.o.minDelayMs, false);
+      }
+    }
+  }
+
+  private async robotsFor(url: string): Promise<RobotsPolicy> {
+    const host = hostOf(url);
+    const cached = this.robots.get(host);
+    if (cached && Date.now() - cached.at < ROBOTS_TTL_MS) return cached.policy;
+    const stored = await repo.getRobots(this.o.db, host);
+    if (stored && Date.now() - stored.fetchedAt.getTime() < ROBOTS_TTL_MS) {
+      const policy = policyFromResponse(robotsUrlFor(url), stored.status, stored.text);
+      this.robots.set(host, { policy, at: stored.fetchedAt.getTime() });
+      return policy;
+    }
+    const fetched = await fetchRobots(url, this.o.userAgent);
+    await repo.saveRobots(this.o.db, host, fetched.status, fetched.text, crawlDelayMs(fetched.policy, this.o.robotsToken));
+    this.robots.set(host, { policy: fetched.policy, at: Date.now() });
+    return fetched.policy;
+  }
+
+  private onLlmCall = (state: CrawlState) => (c: CallInfo) => {
+    if (!c.cached) state.llmCalls++;
+    state.llmCost += c.costUsd;
+  };
+
+  private async process(state: CrawlState, item: repo.FrontierItem) {
+    const { db, events } = this.o;
+    const id = state.crawl.id;
+    const { scope } = state;
+
+    // robots.txt first
+    const policy = await this.robotsFor(item.url);
+    if (!isAllowed(policy, item.url, this.o.robotsToken)) {
+      await repo.finishItem(db, id, item.url_hash, "skipped", null, "robots.txt");
+      await repo.releaseHost(db, item.host, this.o.minDelayMs, false);
+      if (item.depth === 0) state.seedOutcome = { status: 0, reason: "robots.txt" };
+      await events.emit(id, "page.skipped", { url: item.url, reason: "robots.txt" });
+      return;
+    }
+    const delay = Math.max(this.o.minDelayMs, crawlDelayMs(policy, this.o.robotsToken) ?? 0);
+
+    await events.emit(id, "page.fetching", { url: item.url, depth: item.depth, path_score: item.path_score }, false);
+    const r = await fetchUrl(item.url, {
+      userAgent: this.o.userAgent,
+      beforeRedirect: async (_from, to) => {
+        const next = normalizeUrl(to);
+        if (!next) return "invalid redirect";
+        if (SOCIAL_HOSTS.test(hostOf(next))) return "redirect out of scope";
+        if (!inScope(next, scope) && item.depth === 0) {
+          // The start page moved to another domain (bozeman.net -> bozemanmt.gov): follow the site.
+          scope.extraHosts.add(hostOf(next));
+          await repo.addExtraHost(db, id, hostOf(next));
+          await events.emit(id, "scope.added", { host: hostOf(next), reason: "the start page redirects there" });
+        }
+        const p = await this.robotsFor(next);
+        return isAllowed(p, next, this.o.robotsToken) ? null : "robots.txt (redirect target)";
+      },
+    });
+
+    // Release the host: one request at a time, at least `delay` apart, longer for slow hosts.
+    const isError = r.status === 0 || r.status >= 500 || r.status === 403 || r.status === 429;
+    const blocked = await repo.releaseHost(db, item.host, Math.max(delay, Math.min(10_000, r.ms)), isError);
+    if (blocked) {
+      const n = await repo.skipQueued(db, id, "host paused after repeated errors", item.host);
+      await events.emit(id, "host.paused", { host: item.host, skipped: n });
+    }
+
+    if (r.error && r.status >= 300 && r.status < 400) {
+      await repo.finishItem(db, id, item.url_hash, "skipped", r.status, r.error);
+      await events.emit(id, "page.skipped", { url: item.url, reason: r.error });
+      return;
+    }
+
+    const failed = r.status === 0 || r.status >= 400;
+    if (failed) {
+      const reason = r.error ?? `HTTP ${r.status}`;
+      if (isRetryable(r) && item.attempts < (this.o.maxAttempts ?? 3)) {
+        const backoff = r.retryAfterMs ?? 2 ** item.attempts * 1000 + Math.floor(Math.random() * 500);
+        await repo.requeueItem(db, id, item.url_hash, Math.min(backoff, 60_000), `retry after ${reason}`);
+        state.claimed--; // a retry does not use the page budget
+        await events.emit(id, "page.failed", { url: item.url, status: r.status, reason, retrying: true });
+        return;
+      }
+      await repo.finishItem(db, id, item.url_hash, "failed", r.status || null, reason);
+      await repo.bumpCrawl(db, id, { failed: 1 });
+      if (item.depth === 0) state.seedOutcome = { status: r.status, reason };
+      await events.emit(id, "page.failed", { url: item.url, status: r.status, reason, retrying: false });
+      return;
+    }
+
+    // A document behind a URL that did not say so (".../DocumentCenter/View/2087").
+    if (!r.isHtml || !r.body) {
+      const fileType = fileTypeFromContentType(r.contentType);
+      await repo.markDocument(db, id, item.url_hash, fileType);
+      await repo.finishItem(db, id, item.url_hash, "done", r.status, `not HTML (${r.contentType ?? "unknown type"})`);
+      await repo.bumpCrawl(db, id, { fetched: 1 });
+      await events.emit(id, "page.fetched", { url: item.url, status: r.status, ms: r.ms, links: 0, document: fileType });
+      return;
+    }
+
+    const finalUrl = normalizeUrl(r.finalUrl) ?? r.finalUrl;
+    const contentHash = createHash("sha256").update(r.body).digest();
+    const duplicate = state.contentHashes.has(contentHash.toString("hex"));
+    state.contentHashes.add(contentHash.toString("hex"));
+    const rawPath = await saveRaw(this.o.rawDir, item.url_hash, r.body);
+    const $ = parseHtml(r.body.toString("utf8"));
+    const page = extractPage($, finalUrl);
+    const xRobots = (r.headers["x-robots-tag"] ?? "").toLowerCase();
+    const nofollow = page.metaNofollow || /\b(nofollow|none)\b/.test(xRobots);
+
+    const pageId = await repo.upsertPage(db, {
+      hash: item.url_hash,
+      url: item.url,
+      finalUrl,
+      host: hostOf(finalUrl),
+      status: r.status,
+      contentType: r.contentType,
+      contentHash,
+      bytes: r.bytes,
+      title: page.title || null,
+      rawPath,
+      needsBrowser: page.thin,
+    });
+
+    if (duplicate) {
+      await repo.finishItem(db, id, item.url_hash, "done", r.status, "same content as a page already read");
+      await repo.bumpCrawl(db, id, { fetched: 1 });
+      await events.emit(id, "page.fetched", { url: item.url, status: r.status, ms: r.ms, links: 0, duplicate: true });
+      return;
+    }
+
+    // ---- rank every link on the page
+    const scored = page.links.map((link) => ({
+      link,
+      s: scoreLink(link, { groups: state.groups, parentPathScore: item.path_score, internal: inScope(link.url, scope) }),
+    }));
+    await this.llmTier(state, scored);
+
+    const results = scored.filter((x) => x.s.targetScore > 0);
+    const saved = await repo.saveLinks(
+      db,
+      id,
+      pageId,
+      item.depth,
+      RANKER_VERSION,
+      results.map(({ link, s }) => ({
+        hash: urlHash(link.url),
+        url: link.url,
+        host: hostOf(link.url),
+        label: link.anchor || link.titleAttr,
+        type: s.type,
+        fileType: s.fileType,
+        fiscalYear: s.fiscalYear,
+        isDraft: s.isDraft,
+        docType: s.docType,
+        targetScore: s.targetScore,
+        pathScore: s.pathScore,
+        matchedKeywords: s.matchedKeywords,
+        reason: s.reason,
+        decidedBy: s.decidedBy ?? "rules",
+        anchor: link.anchor,
+        heading: link.heading,
+        context: link.context,
+        boilerplate: link.boilerplate,
+      })),
+    );
+    for (const l of saved.filter((x) => x.isNew && x.targetScore >= 0.5).slice(0, 25)) {
+      await events.emit(id, "link.found", {
+        url: l.url,
+        type: l.type,
+        doc_type: l.docType,
+        fiscal_year: l.fiscalYear,
+        score: l.targetScore,
+        page: item.url,
+      });
+    }
+
+    // ---- contacts
+    const contacts = await findContacts($, page.dataBlocks, {
+      groups: state.groups,
+      entityDomain: scope.domain,
+      pagePathScore: item.path_score,
+      llm: this.o.llm,
+      onLlmCall: this.onLlmCall(state),
+    });
+    if (contacts.length) {
+      const fresh = await repo.saveContacts(
+        db,
+        id,
+        contacts.map((c) => ({
+          host: hostOf(finalUrl),
+          name: c.name,
+          title: c.title,
+          email: c.email,
+          phone: c.phone,
+          score: c.score,
+          matchedKeywords: c.matchedKeywords,
+          sourcePageId: pageId,
+          sourceUrl: finalUrl,
+          snippet: c.snippet,
+          decidedBy: c.decidedBy,
+        })),
+      );
+      for (const c of contacts.filter((x) => fresh.includes(x.name))) {
+        await events.emit(id, "contact.found", { name: c.name, title: c.title, email: c.email, score: c.score, page: finalUrl });
+      }
+    }
+
+    // ---- queue the pages worth visiting
+    if (!nofollow) await this.enqueueLinks(state, item, scored.filter((x) => x.s.type === "page" && !x.s.noise));
+
+    await repo.finishItem(db, id, item.url_hash, "done", r.status, nofollow ? "nofollow: links recorded, not followed" : null);
+    await repo.bumpCrawl(db, id, { fetched: 1 });
+    await events.emit(id, "page.fetched", {
+      url: item.url,
+      final_url: finalUrl !== item.url ? finalUrl : undefined,
+      status: r.status,
+      ms: r.ms,
+      depth: item.depth,
+      path_score: item.path_score,
+      links: page.links.length,
+      results: results.length,
+      contacts: contacts.length,
+      needs_browser: page.thin || undefined,
+    });
+  }
+
+  /** Sends the links the rules are unsure about to the LLM, in batches of up to 50. */
+  private async llmTier(state: CrawlState, scored: { link: LinkCandidate; s: LinkScore }[]) {
+    if (!this.o.llm.enabled) return;
+    const unsure = scored.filter((x) => x.s.targetScore >= UNSURE_LOW && x.s.targetScore < UNSURE_HIGH);
+    for (let i = 0; i < unsure.length; i += 50) {
+      const batch = unsure.slice(i, i + 50);
+      const answer = await this.o.llm.classifyLinks(
+        batch.map((x, j) => ({ i: j, url: x.link.url, anchor: x.link.anchor || x.link.titleAttr, heading: x.link.heading, context: x.link.context })),
+        state.groups,
+        this.onLlmCall(state),
+      );
+      if (!answer) continue; // the rules score stays
+      for (const a of answer) {
+        const x = batch[a.i];
+        if (!x) continue;
+        const before = x.s.targetScore;
+        x.s = {
+          ...x.s,
+          targetScore: Math.round(a.target_score * 1000) / 1000,
+          docType: a.doc_type,
+          pathScore: x.s.type === "page" ? Math.max(x.s.pathScore, a.path_score) : 0,
+          reason: `LLM: ${a.reason} (rules said ${before.toFixed(2)}: ${x.s.reason})`,
+        };
+        x.s.decidedBy = "llm";
+      }
+    }
+  }
+
+  private async enqueueLinks(state: CrawlState, item: repo.FrontierItem, pages: { link: LinkCandidate; s: LinkScore }[]) {
+    const { db, events } = this.o;
+    const id = state.crawl.id;
+    const rows: repo.EnqueueRow[] = [];
+    const seen = new Set<string>();
+    for (const { link, s } of pages) {
+      if (seen.has(link.url)) continue;
+      seen.add(link.url);
+      const host = hostOf(link.url);
+      let inside = inScope(link.url, state.scope);
+      if (!inside && isEntityNamedHost(host, state.scope.domain)) {
+        // The entity's own pages on a vendor platform (boerneisd.smartsiteshost.com).
+        state.scope.extraHosts.add(host);
+        await repo.addExtraHost(db, id, host);
+        await events.emit(id, "scope.added", { host, reason: "the host carries the entity's site name" });
+        inside = true;
+      }
+      const trap = inside ? trapReason(link.url) : null;
+      const tooDeep = item.depth + 1 > state.crawl.max_depth;
+      const reason = !inside ? "out of scope" : trap ? `trap: ${trap}` : tooDeep ? "beyond max depth" : link.nofollow ? "rel=nofollow" : null;
+      rows.push({
+        hash: urlHash(link.url),
+        url: link.url,
+        host,
+        depth: item.depth + 1,
+        pathScore: s.pathScore,
+        parent: item.url,
+        status: reason ? "skipped" : "queued",
+        reason,
+      });
+    }
+    // Never queue on a host that is paused.
+    const paused = new Set(await repo.blockedHosts(db, [...new Set(rows.map((r) => r.host))]));
+    for (const r of rows) if (r.status === "queued" && paused.has(r.host)) Object.assign(r, { status: "skipped", reason: "host paused" });
+
+    const fresh = await repo.enqueue(db, id, rows);
+    // Keep the live feed readable: report skips that matter, not every link to another site.
+    const byUrl = new Map(rows.map((r) => [r.url, r]));
+    for (const f of fresh.filter((f) => f.status === "skipped")) {
+      const row = byUrl.get(f.url)!;
+      if (f.reason === "out of scope" && row.pathScore < 0.3) continue;
+      await events.emit(id, "page.skipped", { url: f.url, reason: f.reason, path_score: row.pathScore });
+    }
+  }
+
+  private async emitStats(state: CrawlState) {
+    const id = state.crawl.id;
+    try {
+      if (state.llmCalls || state.llmCost) {
+        await repo.bumpCrawl(this.o.db, id, { llmCalls: state.llmCalls, llmCost: state.llmCost });
+        state.llmCalls = 0;
+        state.llmCost = 0;
+      }
+      const c = await repo.crawlCounters(this.o.db, id);
+      const crawl = await repo.getCrawl(this.o.db, id);
+      await this.o.events.emit(id, "stats", { ...c, llm_calls: crawl?.llm_calls ?? 0, llm_cost_usd: crawl?.llm_cost_usd ?? 0 }, false);
+    } catch (err) {
+      this.o.log.warn({ err }, "stats failed");
+    }
+  }
+}
