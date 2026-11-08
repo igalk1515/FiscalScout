@@ -2,6 +2,7 @@ import type { AppContext } from "../app.js";
 import { findContacts } from "../ranking/contacts.js";
 import { compileKeywords, type KeywordConfig } from "../ranking/keywords.js";
 import { RANKER_VERSION, scoreLink } from "../ranking/rules.js";
+import { applyLlmTier } from "../ranking/tier.js";
 import * as repo from "../store/repo.js";
 import { extractPage, parseHtml } from "./extract.js";
 import { readRaw } from "./rawstore.js";
@@ -9,10 +10,12 @@ import { hostOf, inScope, urlHash } from "./url.js";
 
 /**
  * Ranks a finished crawl again from the raw pages saved on disk, without fetching anything:
- * after a change to the rules, or with a different keyword set. Rules only.
+ * after a change to the rules, or with a different keyword set. With llm, the LLM tier runs too.
  * The raw file of a URL is its latest fetch, which may come from a later crawl.
  */
-export async function rescoreCrawl(ctx: AppContext, crawlId: string, keywords?: KeywordConfig) {
+export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { keywords?: KeywordConfig; llm?: boolean } = {}) {
+  const { keywords } = opts;
+  const llm = opts.llm ? ctx.llm : null;
   const crawl = await repo.getCrawl(ctx.db, crawlId);
   if (!crawl) throw new Error(`crawl ${crawlId} not found`);
   const groups = compileKeywords(keywords ?? crawl.keywords);
@@ -42,9 +45,9 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, keywords?: 
     const pageUrl = p.final_url ?? p.url;
     const $ = parseHtml(html);
     const page = extractPage($, pageUrl);
-    const scored = page.links
-      .map((link) => ({ link, s: scoreLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope) }) }))
-      .filter((x) => x.s.targetScore > 0);
+    const all = page.links.map((link) => ({ link, s: scoreLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope) }) }));
+    if (llm) await applyLlmTier(llm, groups, all); // answers seen before come from the cache, free
+    const scored = all.filter((x) => x.s.targetScore > 0);
     const saved = await repo.saveLinks(
       ctx.db,
       crawlId,
@@ -65,7 +68,7 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, keywords?: 
         pathScore: s.pathScore,
         matchedKeywords: s.matchedKeywords,
         reason: s.reason,
-        decidedBy: "rules",
+        decidedBy: s.decidedBy ?? "rules",
         anchor: link.anchor,
         heading: link.heading,
         context: link.context,
@@ -73,7 +76,7 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, keywords?: 
       })),
     );
     links += saved.filter((x) => x.isNew).length;
-    const people = await findContacts($, page.dataBlocks, { groups, entityDomain: scope.domain, pagePathScore: p.path_score });
+    const people = await findContacts($, page.dataBlocks, { groups, entityDomain: scope.domain, pagePathScore: p.path_score, llm });
     if (people.length) {
       const fresh = await repo.saveContacts(
         ctx.db,

@@ -2,6 +2,7 @@
 // Usage:
 //   npm run rescore -- <crawl-id>
 //   npm run rescore -- --test-sites     (the latest crawl of each test site)
+//   add --llm to run the LLM tier too (cached answers are free)
 import { createContext } from "../app.js";
 import { rescoreCrawl } from "../crawler/rescore.js";
 import { hostOf, normalizeUrl, registrableDomain } from "../crawler/url.js";
@@ -24,7 +25,7 @@ if (!ids.length) {
 }
 for (const id of ids) {
   const t0 = Date.now();
-  const r = await rescoreCrawl(ctx, id);
+  const r = await rescoreCrawl(ctx, id, { llm: process.argv.includes("--llm") && ctx.llm.enabled });
   const c = await repo.getCrawl(ctx.db, id);
   console.log(`${c!.seed_url}: ${r.pages} pages re-ranked from disk in ${Date.now() - t0} ms, ${r.links} links, ${r.contacts} contacts${r.missing ? `, ${r.missing} raw files missing` : ""}`);
 }
