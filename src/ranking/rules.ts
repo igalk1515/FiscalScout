@@ -166,14 +166,17 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
       target -= 0.15;
       notes.push("marked as a draft (-0.15)");
     }
-    const paperWords = `${anchor} ${link.titleAttr} ${urlWords(fileName)}`;
-    if (best.kind === "document" && SUPPORTING_PAPER.test(paperWords)) {
-      target -= 0.2;
-      notes.push(`a paper about the document ('${paperWords.match(SUPPORTING_PAPER)![0]}'), not the document itself (-0.20)`);
-    }
     if (link.boilerplate) {
       target -= 0.2;
       notes.push("in a menu, header or footer (-0.20)");
+    }
+    // Multipliers come after the sum is capped at 1, so they still separate links whose sum
+    // went past 1 (otherwise FY2026 and FY2025 budgets would both sit at 1.00).
+    target = Math.min(1, target);
+    const paperWords = `${anchor} ${link.titleAttr} ${urlWords(fileName)}`;
+    if (best.kind === "document" && SUPPORTING_PAPER.test(paperWords)) {
+      target *= 0.6;
+      notes.push(`a paper about the document ('${paperWords.match(SUPPORTING_PAPER)![0]}'), not the document itself (x0.60)`);
     }
     if (best.kind === "document") {
       const mult = recencyMultiplier(year, now);

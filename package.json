@@ -18,7 +18,8 @@
     "crawl:test-sites": "tsx src/cli/crawl.ts --test-sites",
     "eval": "tsx src/cli/eval.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "rescore": "tsx src/cli/rescore.ts"
   },
   "dependencies": {
     "@fastify/swagger": "9.4.2",
