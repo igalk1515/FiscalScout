@@ -62,6 +62,21 @@ describe("LLM tier", () => {
     expect(xs[0]!.s.targetScore).toBeCloseTo(0.54);
   });
 
+  it("puts links the rules are sure about on the same scale, so a lifted older year stays below", async () => {
+    const heading = "Annual Comprehensive Financial Report (ACFR)";
+    const fy25 = { ...link("https://cdn.gov/city-6-30-25-acfr-final.pdf", "Fiscal Year 2025"), heading };
+    const fy24 = { ...link("https://cdn.gov/city-6-30-24-acfr-final.pdf", "Fiscal Year 2024"), heading };
+    const xs = [fy25, fy24].map((l) => ({ link: l, s: scoreLink(l, { groups, parentPathScore: 0.9, internal: false, now: NOW }) }));
+    xs[1]!.s.targetScore = 0.65; // the older year fell into the unsure band
+    const fake: LlmClient = {
+      enabled: true, model: "fake", extractContacts: async () => [],
+      classifyLinks: async (items) => items.map((it) => ({ i: it.i, doc_type: "acfr", target_score: 1, path_score: 0, reason: "an ACFR" })),
+    };
+    await applyLlmTier(fake, groups, xs, undefined, NOW);
+    expect(xs[1]!.s.decidedBy).toBe("llm");
+    expect(xs[0]!.s.targetScore).toBeGreaterThan(xs[1]!.s.targetScore);
+  });
+
   it("keeps the rules scores when the call fails", async () => {
     const xs = [link("https://x.edu/a-2026-annual-comp-fin-rpt.pdf", "Annual comprehensive financial report 2026")].map((l) => ({
       link: l,

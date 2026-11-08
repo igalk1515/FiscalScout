@@ -1,13 +1,11 @@
-# Evaluation · 2026-11-08 10:59 UTC
+# Evaluation · 2026-11-08 11:04 UTC
 
-LLM tier: gpt-4o-mini
-
-| Site | Crawl | Must-find | Precision@10 (documents) |
-|---|---|---|---|
-| Ann Arbor | done, 281 pages | 3/3 | 10/10 |
-| Boerne ISD | done, 285 pages | 3/3 | 10/10 |
-| Arizona State University | done, 293 pages | 3/3 | 8/10 |
-| Bozeman | blocked, 0 pages | blocked and reported, as expected | - |
+| Site | Crawl | Must-find | Precision@10 (documents) | Links decided by the LLM |
+|---|---|---|---|---|
+| Ann Arbor | done, 281 pages | 3/3 | 10/10 | 225 of 327 |
+| Boerne ISD | done, 285 pages | 3/3 | 10/10 | 6 of 23 |
+| Arizona State University | done, 293 pages | 3/3 | 8/10 | 21 of 33 |
+| Bozeman | blocked, 0 pages | blocked and reported, as expected | - | - |
 
 **Must-find recall: 9/9**
 
@@ -22,9 +20,9 @@ Precision@10 counts how many of the ten best-scored documents match a hand-writt
 Top 5 documents:
 - 0.95 budget 2026 Adopted Budget FY2026 <https://www.a2gov.org/media/je4nrvnr/fy26-budget-book.pdf>
 - 0.92 single audit 2025 Fiscal Year 2025 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/ebznvooc/city-of-ann-arbor-6-30-25-saac-final.pdf>
-- 0.90 budget 2027 FY27 Budget Responses - May 1, 2026 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/ydonlxha/260501-fy27-budget-responses.pdf>
-- 0.90 budget 2027 FY27 Budget Responses - May 13, 2026 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/x1klbt5c/260513-fy27-budget-responses.pdf>
-- 0.90 budget 2026 FY26 Budget Responses - May 9, 2025 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/xfsl3xp0/250509-fy26-budget-responses.pdf>
+- 0.87 budget 2025 Adopted Budget FY2025 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/swaherth/budget-book-fy25.pdf>
+- 0.84 acfr 2024 Fiscal Year 2024 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/ae2lvwvx/city-of-ann-arbor-6-30-24-acfr-final-1.pdf>
+- 0.84 single audit 2024 Fiscal Year 2024 <https://media-001-us.cdn.govstack.com/a2gov-002-us/media/2qtfnm5b/city-of-ann-arbor-6-30-24-saac-final.pdf>
 
 ## Boerne ISD
 

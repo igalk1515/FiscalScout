@@ -43,10 +43,8 @@ const out = (s = "") => {
 };
 out(`# Evaluation · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`);
 out("");
-out(`LLM tier: ${ctx.llm.enabled ? ctx.llm.model : "off (no OPENAI_API_KEY), rules only"}`);
-out("");
-out("| Site | Crawl | Must-find | Precision@10 (documents) |");
-out("|---|---|---|---|");
+out("| Site | Crawl | Must-find | Precision@10 (documents) | Links decided by the LLM |");
+out("|---|---|---|---|---|");
 
 const details: string[] = [];
 let found = 0;
@@ -60,13 +58,13 @@ for (const site of spec.sites) {
   );
   const crawl = latest.rows[0];
   if (!crawl) {
-    out(`| ${site.name} | no crawl yet | - | - |`);
+    out(`| ${site.name} | no crawl yet | - | - | - |`);
     continue;
   }
   const crawlText = `${crawl.status}, ${crawl.pages_fetched} pages`;
   if (site.expect_blocked) {
     const ok = crawl.status === "blocked";
-    out(`| ${site.name} | ${crawlText} | ${ok ? "blocked and reported, as expected" : "expected a blocked report"} | - |`);
+    out(`| ${site.name} | ${crawlText} | ${ok ? "blocked and reported, as expected" : "expected a blocked report"} | - | - |`);
     details.push(`\n## ${site.name}\n\n- ${crawl.status_detail ?? crawl.status}`);
     continue;
   }
@@ -105,7 +103,12 @@ for (const site of spec.sites) {
   found += siteFound;
   const top10 = docs.rows.slice(0, 10);
   const precise = top10.filter((d) => relevant.test(`${d.url} ${d.label ?? ""}`)).length;
-  out(`| ${site.name} | ${crawlText} | ${siteFound}/${site.expect.length} | ${top10.length ? `${precise}/${top10.length}` : "-"} |`);
+  const by = await ctx.db.query<{ llm: number; total: number }>(
+    "select count(*) filter (where decided_by = 'llm')::int as llm, count(*)::int as total from link_scores where crawl_id = $1",
+    [crawl.id],
+  );
+  const decided = `${by.rows[0]!.llm} of ${by.rows[0]!.total}`;
+  out(`| ${site.name} | ${crawlText} | ${siteFound}/${site.expect.length} | ${top10.length ? `${precise}/${top10.length}` : "-"} | ${decided} |`);
   siteDetails.push("", "Top 5 documents:");
   for (const d of docs.rows.slice(0, 5)) {
     siteDetails.push(`- ${d.target_score.toFixed(2)} ${d.doc_type ?? "-"} ${d.fiscal_year ?? ""} ${d.label ?? ""} <${d.url}>`);
