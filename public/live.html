@@ -147,6 +147,7 @@
     on("host.paused", (d) => addRow("pause", "bad", "", d.host, `paused after errors · ${d.skipped} skipped`, "bad"));
     on("link.found", (d) => { addRow("★ " + (d.doc_type || "link"), "star", Number(d.score).toFixed(2), d.url, d.fiscal_year ? "FY" + d.fiscal_year : "", "star"); });
     on("contact.found", (d) => addRow("★ contact", "star", Number(d.score).toFixed(2), d.page, `${d.name} · ${d.title || ""}`, "star"));
+    on("llm.capped", (d) => addRow("llm", "warn", "", crawl.seed_url, `spending cap $${d.cap_usd} reached: rules only from here`, "warn"));
     on("stats", (d) => setCounters(d));
     for (const end of ["crawl.done", "crawl.blocked", "crawl.failed"]) {
       on(end, (d) => { setStatus(end.split(".")[1], d.detail); addRow("end", end === "crawl.done" ? "ok" : "bad", "", crawl.seed_url, d.detail || end); refreshResults(); es.close(); });
