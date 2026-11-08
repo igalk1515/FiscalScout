@@ -201,7 +201,7 @@ export async function releaseHost(db: Db, host: string, delayMs: number, outcome
     `update sites s set
        backoff_ms = case when $3 = 'slow_down' then least(60000, greatest(2000, s.backoff_ms * 2)) else s.backoff_ms / 2 end,
        next_allowed_at = now() + make_interval(secs => greatest($2::float8,
-         case when $3 = 'slow_down' then least(60000, greatest(2000, s.backoff_ms * 2)) else s.backoff_ms / 2 end, $4::float8) / 1000)
+         case when $3 = 'slow_down' then least(60000, greatest(2000, s.backoff_ms * 2)) else s.backoff_ms / 2 end, least($4::float8, 600000)) / 1000)
      from hosts h where h.host = $1 and s.site = h.site`,
     [host, delayMs, outcome, retryAfterMs],
   );

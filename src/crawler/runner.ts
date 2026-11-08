@@ -4,7 +4,8 @@ import type { EventBus } from "../events.js";
 import { findContacts } from "../ranking/contacts.js";
 import { compileKeywords, type CompiledGroup } from "../ranking/keywords.js";
 import type { CallInfo, LlmClient } from "../ranking/llm.js";
-import { RANKER_VERSION, scoreLink, SOCIAL_HOSTS, UNSURE_HIGH, UNSURE_LOW, type LinkScore } from "../ranking/rules.js";
+import { RANKER_VERSION, scoreLink, SOCIAL_HOSTS, type LinkScore } from "../ranking/rules.js";
+import { applyLlmTier } from "../ranking/tier.js";
 import * as repo from "../store/repo.js";
 import { extractPage, parseHtml, type LinkCandidate } from "./extract.js";
 import { fetchUrl, isRetryable } from "./fetcher.js";
@@ -179,8 +180,8 @@ export class CrawlRunner {
         if (pending.queued === 0 && pending.fetching === 0) return;
         // Nothing can be claimed for a long time (every remaining host is paused or backing off):
         // finish instead of waiting, and say why.
-        if (pending.fetching === 0 && (pending.waitSeconds ?? 0) > 300) {
-          const n = await repo.skipQueued(db, id, "host paused or backing off for more than 5 minutes");
+        if (pending.fetching === 0 && (pending.waitSeconds ?? 0) > 960) {
+          const n = await repo.skipQueued(db, id, "host paused or backing off for more than 16 minutes");
           await this.o.events.emit(id, "page.skipped", { url: state.crawl.seed_url, reason: `${n} queued URLs left: their hosts are paused` });
           return;
         }
@@ -337,7 +338,7 @@ export class CrawlRunner {
       link,
       s: scoreLink(link, { groups: state.groups, parentPathScore: item.path_score, internal: inScope(link.url, scope) }),
     }));
-    await this.llmTier(state, scored);
+    await applyLlmTier(this.o.llm, state.groups, scored, this.onLlmCall(state));
 
     const results = scored.filter((x) => x.s.targetScore > 0);
     const saved = await repo.saveLinks(
@@ -426,34 +427,6 @@ export class CrawlRunner {
       contacts: contacts.length,
       needs_browser: page.thin || undefined,
     });
-  }
-
-  /** Sends the links the rules are unsure about to the LLM, in batches of up to 50. */
-  private async llmTier(state: CrawlState, scored: { link: LinkCandidate; s: LinkScore }[]) {
-    if (!this.o.llm.enabled) return;
-    const unsure = scored.filter((x) => x.s.targetScore >= UNSURE_LOW && x.s.targetScore < UNSURE_HIGH);
-    for (let i = 0; i < unsure.length; i += 50) {
-      const batch = unsure.slice(i, i + 50);
-      const answer = await this.o.llm.classifyLinks(
-        batch.map((x, j) => ({ i: j, url: x.link.url, anchor: x.link.anchor || x.link.titleAttr, heading: x.link.heading, context: x.link.context })),
-        state.groups,
-        this.onLlmCall(state),
-      );
-      if (!answer) continue; // the rules score stays
-      for (const a of answer) {
-        const x = batch[a.i];
-        if (!x) continue;
-        const before = x.s.targetScore;
-        x.s = {
-          ...x.s,
-          targetScore: Math.round(a.target_score * 1000) / 1000,
-          docType: a.doc_type,
-          pathScore: x.s.type === "page" ? Math.max(x.s.pathScore, a.path_score) : 0,
-          reason: `LLM: ${a.reason} (rules said ${before.toFixed(2)}: ${x.s.reason})`,
-        };
-        x.s.decidedBy = "llm";
-      }
-    }
   }
 
   private async enqueueLinks(state: CrawlState, item: repo.FrontierItem, pages: { link: LinkCandidate; s: LinkScore }[]) {

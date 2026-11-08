@@ -10,7 +10,9 @@ import { fetchRobots, isAllowed } from "../crawler/robots.js";
 import { inScope, registrableDomain } from "../crawler/url.js";
 import { findContacts } from "../ranking/contacts.js";
 import { compileKeywords, DEFAULT_KEYWORDS } from "../ranking/keywords.js";
+import { createLlm, memoryCache } from "../ranking/llm.js";
 import { scoreLink } from "../ranking/rules.js";
+import { applyLlmTier } from "../ranking/tier.js";
 
 const args = process.argv.slice(2);
 const target = args.find((a) => !a.startsWith("--"));
@@ -49,6 +51,15 @@ const scored = page.links.map((l) => ({
   link: l,
   s: scoreLink(l, { groups, parentPathScore: 0.9, internal: inScope(l.url, scope) }),
 }));
+// With a key, unsure links go to the LLM, exactly as in a crawl.
+const llm = createLlm({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL, baseUrl: config.OPENAI_BASE_URL, cache: memoryCache(), onError: (m) => console.warn(m) });
+let calls = 0;
+let cost = 0;
+const onCall = (c: { cached: boolean; costUsd: number }) => {
+  calls += c.cached ? 0 : 1;
+  cost += c.costUsd;
+};
+const decided = await applyLlmTier(llm, groups, scored, onCall);
 
 console.log(`${page.title}\n${pageUrl}`);
 console.log(`${page.links.length} links, ${page.visibleTextLength} characters of text${page.thin ? ", THIN (needs a browser)" : ""}\n`);
@@ -67,9 +78,12 @@ const contacts = await findContacts($, page.dataBlocks, {
   groups,
   entityDomain: scope.domain,
   pagePathScore: 0.9,
+  llm,
+  onLlmCall: onCall,
 });
-console.log(`\nContacts${config.OPENAI_API_KEY ? "" : " (rules only, no LLM key)"}`);
+console.log(`\nContacts${llm.enabled ? "" : " (rules only, no LLM key)"}`);
 for (const c of contacts) {
-  console.log(`  ${c.score.toFixed(2)}  ${c.name} | ${c.title ?? "-"} | ${c.email ?? "-"} | ${c.phone ?? "-"}`);
+  console.log(`  ${c.score.toFixed(2)}  ${c.name} | ${c.title ?? "-"} | ${c.email ?? "-"} | ${c.phone ?? "-"}  [${c.decidedBy}]`);
 }
 if (!contacts.length) console.log("  none");
+console.log(llm.enabled ? `\nLLM: ${llm.model}, ${decided} links decided, ${calls} calls, $${cost.toFixed(4)}` : "\nLLM: off (no OPENAI_API_KEY)");
