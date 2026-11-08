@@ -145,7 +145,17 @@ export interface FrontierItem {
  * SKIP LOCKED lets any number of workers share the queue without waiting on each other or
  * taking the same row.
  */
-export async function claimNext(db: Db, crawlId: string, explore: boolean, maxPerHost?: number): Promise<FrontierItem | null> {
+/**
+ * Claims the best queued URL whose site is free. `maxPerHost` caps how many pages one host may
+ * use, except the hosts in `uncapped`: the entity's main site, which holds most of its pages.
+ */
+export async function claimNext(
+  db: Db,
+  crawlId: string,
+  explore: boolean,
+  maxPerHost?: number,
+  uncapped: ReadonlySet<string> = new Set(),
+): Promise<FrontierItem | null> {
   return tx(db, async (client) => {
     const r = await client.query<FrontierItem & { site: string }>(
       `with next as (
@@ -169,7 +179,7 @@ export async function claimNext(db: Db, crawlId: string, explore: boolean, maxPe
     if (!item) return null;
     // Lease the site: nobody else may send it a request until releaseHost sets the next time.
     await client.query("update sites set next_allowed_at = now() + interval '10 minutes' where site = $1", [item.site]);
-    if (maxPerHost) {
+    if (maxPerHost && !uncapped.has(item.host)) {
       // One host may not use up the whole page budget (a university's online-degree site).
       const used = await client.query<{ n: number }>(
         "select count(*)::int as n from frontier where crawl_id = $1 and host = $2 and status in ('done', 'failed', 'fetching')",
@@ -330,6 +340,19 @@ export async function enqueue(db: Db, crawlId: string, rows: EnqueueRow[]): Prom
     [crawlId, JSON.stringify(payload)],
   );
   return res.rows.filter((r) => r.inserted);
+}
+
+/**
+ * Records that a URL is being read through its copy on a mirror host, so it is not fetched again.
+ * Returns false when the URL was already read (or is being read): the copy is then a duplicate.
+ */
+export async function markReadAs(db: Db, crawlId: string, row: EnqueueRow): Promise<boolean> {
+  if ((await enqueue(db, crawlId, [{ ...row, status: "skipped" }])).length) return true;
+  const cur = await db.query<{ status: string }>("select status from frontier where crawl_id = $1 and url_hash = $2", [crawlId, row.hash]);
+  const status = cur.rows[0]?.status;
+  if (status === "done" || status === "fetching") return false;
+  if (status === "queued") await finishItem(db, crawlId, row.hash, "skipped", null, row.reason);
+  return true;
 }
 
 // ---------------------------------------------------------------- hosts and robots.txt
@@ -536,29 +559,54 @@ export interface ContactRecord {
 }
 
 /**
- * Stores contacts for a crawl, one row per person: the same name, or the same email under a
- * shorter name ("Wes Scott" and "Wesley Scott"), is one contact. Returns the names that are new.
+ * Two spellings of one person's name: the same last name, and one first name is the short form
+ * of the other ("Wes Scott" and "Wesley Scott"), with titles that agree.
+ */
+export function samePerson(a: { name: string; title: string | null }, b: { name: string; title: string | null }): boolean {
+  const ta = a.name.toLowerCase().split(/\s+/);
+  const tb = b.name.toLowerCase().split(/\s+/);
+  if (ta[ta.length - 1] !== tb[tb.length - 1]) return false;
+  const [fa, fb] = [ta[0]!, tb[0]!];
+  if (fa === fb || fa.length < 3 || fb.length < 3 || !(fa.startsWith(fb) || fb.startsWith(fa))) return false;
+  const [x, y] = [(a.title ?? "").toLowerCase(), (b.title ?? "").toLowerCase()];
+  return !x || !y || x.includes(y) || y.includes(x);
+}
+
+/**
+ * Stores contacts for a crawl, one row per person: the same name, the same email under another
+ * name, or a short form of the name with the same title ("Wes Scott" and "Wesley Scott") is one
+ * contact. Returns the names that are new.
  */
 export async function saveContacts(db: Db, crawlId: string, contacts: ContactRecord[]): Promise<string[]> {
   const fresh: string[] = [];
   for (const c of contacts) {
+    let prev: { id: number } | undefined;
     if (c.email) {
       const same = await db.query<{ id: number; name: string }>(
         "select id, name from contacts where crawl_id = $1 and email = $2 and name <> $3 limit 1",
         [crawlId, c.email, c.name],
       );
-      const prev = same.rows[0];
-      if (prev) {
-        await db.query(
-          `update contacts set
-             name = case when length($2) > length(name) then $2 else name end,
-             title = case when length(coalesce($3, '')) > length(coalesce(title, '')) then $3 else title end,
-             phone = coalesce(phone, $4), score = greatest(score, $5)
-           where id = $1`,
-          [prev.id, c.name, c.title, c.phone, c.score],
-        );
-        continue;
-      }
+      prev = same.rows[0];
+    }
+    if (!prev) {
+      const last = c.name.split(/\s+/).pop()!;
+      const others = await db.query<{ id: number; name: string; title: string | null }>(
+        `select id, name, title from contacts where crawl_id = $1 and name <> $2 and lower(name) like '% ' || lower($3)
+           and not exists (select 1 from contacts x where x.crawl_id = $1 and x.name = $2)`,
+        [crawlId, c.name, last],
+      );
+      prev = others.rows.find((o) => samePerson(o, c));
+    }
+    if (prev) {
+      await db.query(
+        `update contacts set
+           name = case when length($2) > length(name) then $2 else name end,
+           title = case when length(coalesce($3, '')) > length(coalesce(title, '')) then $3 else title end,
+           email = coalesce(email, $6), phone = coalesce(phone, $4), score = greatest(score, $5)
+         where id = $1`,
+        [prev.id, c.name, c.title, c.phone, c.score, c.email],
+      );
+      continue;
     }
     const r = await db.query<{ inserted: boolean }>(
       `insert into contacts (crawl_id, host, name, title, email, phone, score, matched_keywords, source_page_id, source_url, source_snippet, decided_by)
@@ -583,6 +631,7 @@ export async function crawlCounters(db: Db, crawlId: string) {
        (select count(*) from frontier where crawl_id = $1 and status = 'fetching')::int as pages_fetching,
        (select count(*) from frontier where crawl_id = $1 and status = 'done')::int as pages_done,
        (select count(*) from frontier where crawl_id = $1 and status = 'failed')::int as pages_failed,
+       (select count(*) from frontier where crawl_id = $1 and status = 'failed' and http_status in (404, 410))::int as pages_broken,
        (select count(*) from frontier where crawl_id = $1 and status = 'skipped')::int as pages_skipped,
        (select count(*) from link_scores where crawl_id = $1 and target_score >= 0.5)::int as results,
        (select count(*) from link_scores s join links l on l.id = s.link_id
@@ -596,6 +645,8 @@ export async function crawlCounters(db: Db, crawlId: string) {
     pages_fetching: number;
     pages_done: number;
     pages_failed: number;
+    /** Failed with 404 or 410: a broken link on the site. */
+    pages_broken: number;
     pages_skipped: number;
     results: number;
     documents: number;

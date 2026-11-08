@@ -17,8 +17,10 @@ import {
   hostOf,
   inScope,
   isEntityNamedHost,
+  mirrorOf,
   normalizeUrl,
   trapReason,
+  unmirror,
   urlHash,
 } from "./url.js";
 
@@ -51,6 +53,13 @@ interface CrawlState {
   scope: CrawlScope;
   claimed: number;
   contentHashes: Set<string>;
+  /** Mirror host -> origin of the site it copies, learned from canonical links. */
+  mirrors: Map<string, string>;
+  /**
+   * The entity's main site: the seed's host, where the seed redirects, and the host a mirrored
+   * seed points to. These are not held to the per-host share of the budget.
+   */
+  mainHosts: Set<string>;
   seedOutcome: { status: number; reason: string } | null;
   llmCalls: number;
   llmCost: number;
@@ -123,6 +132,8 @@ export class CrawlRunner {
       scope: { domain: crawl.scope_domain, extraHosts: new Set(crawl.extra_hosts) },
       claimed: crawl.pages_fetched + crawl.pages_failed,
       contentHashes: new Set(),
+      mirrors: new Map(),
+      mainHosts: new Set([hostOf(crawl.seed_url)]),
       seedOutcome: null,
       llmCalls: 0,
       llmCost: 0,
@@ -179,9 +190,10 @@ export class CrawlRunner {
     while (!this.stopping) {
       if (state.claimed >= state.crawl.page_budget) return;
       const explore = Math.random() < (this.o.exploreRate ?? 0.1);
-      // No host may take more than 30% of the budget, so one big subdomain cannot crowd out the rest.
+      // No host other than the main site may take more than 30% of the budget, so one big
+      // subdomain cannot crowd out the rest.
       const maxPerHost = Math.max(30, Math.ceil(state.crawl.page_budget * 0.3));
-      const item = await repo.claimNext(db, id, explore, maxPerHost);
+      const item = await repo.claimNext(db, id, explore, maxPerHost, state.mainHosts);
       if (!item) {
         const pending = await repo.pendingCounts(db, id);
         if (pending.queued === 0 && pending.fetching === 0) return;
@@ -248,6 +260,19 @@ export class CrawlRunner {
     const id = state.crawl.id;
     const { scope } = state;
 
+    // A URL queued before its host was known to be a mirror: queue the original instead (the
+    // seen check drops it if it is already known) and spend no request on the copy.
+    const original = unmirror(item.url, state.mirrors);
+    if (original !== item.url) {
+      await repo.enqueue(db, id, [
+        { hash: urlHash(original), url: original, host: hostOf(original), depth: item.depth, pathScore: item.path_score, parent: item.parent_url ?? item.url, status: "queued", reason: null },
+      ]);
+      await repo.finishItem(db, id, item.url_hash, "skipped", null, `mirror of ${hostOf(original)}`);
+      await repo.releaseHost(db, item.host, 0, "ok");
+      state.claimed--;
+      return;
+    }
+
     // robots.txt first
     const policy = await this.robotsFor(item.url);
     if (!isAllowed(policy, item.url, this.o.robotsToken)) {
@@ -266,6 +291,7 @@ export class CrawlRunner {
         const next = normalizeUrl(to);
         if (!next) return "invalid redirect";
         if (SOCIAL_HOSTS.test(hostOf(next))) return "redirect out of scope";
+        if (item.depth === 0) state.mainHosts.add(hostOf(next));
         if (!inScope(next, scope) && item.depth === 0) {
           // The start page moved to another domain (bozeman.net -> bozemanmt.gov): follow the site.
           scope.extraHosts.add(hostOf(next));
@@ -307,7 +333,7 @@ export class CrawlRunner {
       await repo.finishItem(db, id, item.url_hash, "failed", r.status || null, reason);
       await repo.bumpCrawl(db, id, { failed: 1 });
       if (item.depth === 0) state.seedOutcome = { status: r.status, reason };
-      await events.emit(id, "page.failed", { url: item.url, status: r.status, reason, retrying: false });
+      await events.emit(id, "page.failed", { url: item.url, status: r.status, reason, retrying: false, parent: item.parent_url });
       return;
     }
 
@@ -323,11 +349,38 @@ export class CrawlRunner {
 
     const finalUrl = normalizeUrl(r.finalUrl) ?? r.finalUrl;
     const contentHash = createHash("sha256").update(r.body).digest();
-    const duplicate = state.contentHashes.has(contentHash.toString("hex"));
+    let duplicate: string | null = state.contentHashes.has(contentHash.toString("hex")) ? "same content as a page already read" : null;
     state.contentHashes.add(contentHash.toString("hex"));
     const rawPath = await saveRaw(this.o.rawDir, item.url_hash, r.body);
     const $ = parseHtml(r.body.toString("utf8"));
     const page = extractPage($, finalUrl);
+
+    // The same site under a second host name: its pages name the original as canonical.
+    // Learn the mirror once, then read every URL on it under the original host.
+    const mirror = mirrorOf(finalUrl, page.canonical, scope);
+    if (mirror) {
+      if (!state.mirrors.has(mirror.host)) {
+        state.mirrors.set(mirror.host, mirror.origin);
+        if (state.mainHosts.has(mirror.host)) state.mainHosts.add(new URL(mirror.origin).host);
+        await events.emit(id, "scope.mirror", { host: mirror.host, same_as: new URL(mirror.origin).host, page: finalUrl });
+      }
+      const canonical = page.canonical!;
+      const fresh = await repo.markReadAs(db, id, {
+        hash: urlHash(canonical), url: canonical, host: hostOf(canonical), depth: item.depth, pathScore: item.path_score, parent: item.url, status: "skipped", reason: `read as ${item.url}`,
+      });
+      if (!fresh && !duplicate) duplicate = `same page as ${canonical}, already read`;
+    }
+    if (state.mirrors.size) {
+      const byUrl = new Map<string, LinkCandidate>();
+      for (const l of page.links) {
+        const url = unmirror(l.url, state.mirrors);
+        const prev = byUrl.get(url);
+        if (!prev || (prev.boilerplate && !l.boilerplate)) byUrl.set(url, { ...l, url });
+      }
+      page.links = [...byUrl.values()];
+    }
+    /** Where a person reading the results should go: the original, not the mirror copy. */
+    const shownUrl = mirror ? page.canonical! : finalUrl;
     const xRobots = (r.headers["x-robots-tag"] ?? "").toLowerCase();
     const nofollow = page.metaNofollow || /\b(nofollow|none)\b/.test(xRobots);
 
@@ -346,7 +399,7 @@ export class CrawlRunner {
     });
 
     if (duplicate) {
-      await repo.finishItem(db, id, item.url_hash, "done", r.status, "same content as a page already read");
+      await repo.finishItem(db, id, item.url_hash, "done", r.status, duplicate);
       await repo.bumpCrawl(db, id, { fetched: 1 });
       await events.emit(id, "page.fetched", { url: item.url, status: r.status, ms: r.ms, links: 0, duplicate: true });
       return;
@@ -411,7 +464,7 @@ export class CrawlRunner {
         db,
         id,
         contacts.map((c) => ({
-          host: hostOf(finalUrl),
+          host: hostOf(shownUrl),
           name: c.name,
           title: c.title,
           email: c.email,
@@ -419,13 +472,13 @@ export class CrawlRunner {
           score: c.score,
           matchedKeywords: c.matchedKeywords,
           sourcePageId: pageId,
-          sourceUrl: finalUrl,
+          sourceUrl: shownUrl,
           snippet: c.snippet,
           decidedBy: c.decidedBy,
         })),
       );
       for (const c of contacts.filter((x) => fresh.includes(x.name))) {
-        await events.emit(id, "contact.found", { name: c.name, title: c.title, email: c.email, score: c.score, page: finalUrl });
+        await events.emit(id, "contact.found", { name: c.name, title: c.title, email: c.email, score: c.score, page: shownUrl });
       }
     }
 

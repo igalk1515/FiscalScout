@@ -55,13 +55,14 @@
 <div id="detail" class="detail"></div>
 <div class="now"><span class="muted">Now</span> <span id="now">–</span></div>
 <div class="grid">
-  <div class="stat"><b id="c-done">0</b><span>pages done</span></div>
-  <div class="stat"><b id="c-queued">0</b><span>queued</span></div>
-  <div class="stat"><b id="c-failed">0</b><span>failed</span></div>
-  <div class="stat"><b id="c-skipped">0</b><span>skipped</span></div>
-  <div class="stat"><b id="c-documents">0</b><span>documents ≥ 0.5</span></div>
-  <div class="stat"><b id="c-contacts">0</b><span>contacts</span></div>
-  <div class="stat"><b id="c-llm">off</b><span>LLM calls · cost</span></div>
+  <div class="stat" title="Pages fetched and read"><b id="c-done">0</b><span>pages done</span></div>
+  <div class="stat" title="Pages waiting to be fetched, best path score first"><b id="c-queued">0</b><span>queued</span></div>
+  <div class="stat" title="Links on the site that lead nowhere: the server answered 404 or 410"><b id="c-broken">0</b><span>broken links</span></div>
+  <div class="stat" title="Other failures: server errors, timeouts or refused requests, after retries"><b id="c-failed">0</b><span>errors</span></div>
+  <div class="stat" title="Not fetched, on purpose: links to other sites, robots.txt rules, traps, copies of the site on a mirror host, or a host that used its share of the page budget"><b id="c-skipped">0</b><span>skipped</span></div>
+  <div class="stat" title="Documents (PDF, spreadsheet...) with a score of at least 0.5 out of 1"><b id="c-documents">0</b><span>documents ≥ 0.5</span></div>
+  <div class="stat" title="People with a relevant title"><b id="c-contacts">0</b><span>contacts</span></div>
+  <div class="stat" title="Calls to the model and their cost. Answers reused from the cache are free and not counted"><b id="c-llm">off</b><span>LLM calls · cost</span></div>
 </div>
 <main>
   <section>
@@ -71,6 +72,7 @@
   <div style="display:grid; gap:14px; align-content:start; min-width:0">
     <section><h2>Best documents so far</h2><ol id="docs"></ol><div id="docs-empty" class="empty">None yet</div></section>
     <section><h2>Contacts</h2><ol id="contacts"></ol><div id="contacts-empty" class="empty">None yet</div></section>
+    <section><h2>Broken links</h2><ol id="broken"></ol><div id="broken-empty" class="empty">None found</div></section>
   </div>
 </main>
 <script>
@@ -102,7 +104,8 @@
   function setCounters(c) {
     $("c-done").textContent = c.pages_done;
     $("c-queued").textContent = c.pages_queued;
-    $("c-failed").textContent = c.pages_failed;
+    $("c-broken").textContent = c.pages_broken ?? 0;
+    $("c-failed").textContent = c.pages_failed - (c.pages_broken ?? 0);
     $("c-skipped").textContent = c.pages_skipped;
     $("c-documents").textContent = c.documents;
     $("c-contacts").textContent = c.contacts;
@@ -111,10 +114,15 @@
   }
 
   async function refreshResults() {
-    const [docs, contacts] = await Promise.all([
+    const [docs, contacts, broken] = await Promise.all([
       fetch(`/v1/links?crawl_id=${id}&type=document&min_score=0.5&limit=8`).then((r) => r.json()),
-      fetch(`/v1/contacts?crawl_id=${id}&limit=6`).then((r) => r.json()),
+      fetch(`/v1/contacts?crawl_id=${id}&limit=10`).then((r) => r.json()),
+      fetch(`/v1/crawls/${id}/pages?status=broken&limit=20`).then((r) => r.json()),
     ]);
+    $("broken").innerHTML = (broken.data || []).map((p) =>
+      `<li><span class="bad">${p.http_status}</span> <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(shortUrl(p.url))}</a>` +
+      (p.parent_url ? `<br><span class="score">found on</span> <a href="${esc(p.parent_url)}" target="_blank" rel="noopener">${esc(shortUrl(p.parent_url))}</a>` : "") + `</li>`).join("");
+    $("broken-empty").style.display = broken.data && broken.data.length ? "none" : "block";
     $("docs").innerHTML = (docs.data || []).map((d) =>
       `<li><span class="score">${d.target_score.toFixed(2)} · ${esc(d.doc_type || "-")}${d.fiscal_year ? " · FY" + d.fiscal_year : ""}</span><br><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.label || shortUrl(d.url))}</a></li>`).join("");
     $("docs-empty").style.display = docs.data && docs.data.length ? "none" : "block";
@@ -141,7 +149,12 @@
     on("page.fetching", (d) => { $("now").textContent = `${shortUrl(d.url)}   depth ${d.depth} · path ${Number(d.path_score).toFixed(2)}`; });
     on("page.fetched", (d) => addRow(d.status, "ok", d.ms + " ms", d.url,
       d.document ? `document (${d.document})` : d.duplicate ? "same content" : `${d.links} links${d.results ? " · " + d.results + " results" : ""}${d.needs_browser ? " · needs browser" : ""}`));
-    on("page.failed", (d) => addRow(d.retrying ? "retry" : "fail", d.retrying ? "warn" : "bad", d.status || "", d.url, d.reason, d.retrying ? "warn" : "bad"));
+    on("page.failed", (d) => {
+      const broken = !d.retrying && (d.status === 404 || d.status === 410);
+      const note = broken ? `broken link${d.parent ? " · on " + shortUrl(d.parent) : ""}` : d.reason;
+      addRow(d.retrying ? "retry" : broken ? "broken" : "fail", d.retrying ? "warn" : "bad", d.status || "", d.url, note, d.retrying ? "warn" : "bad");
+    });
+    on("scope.mirror", (d) => addRow("mirror", "ok", "", d.host, `a copy of ${d.same_as}: read there instead`));
     on("page.skipped", (d) => addRow("skip", "warn", "", d.url, d.reason, "muted"));
     on("scope.added", (d) => addRow("scope", "ok", "", d.host, d.reason));
     on("host.paused", (d) => addRow("pause", "bad", "", d.host, `paused after errors · ${d.skipped} skipped`, "bad"));

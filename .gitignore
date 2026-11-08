@@ -4,3 +4,6 @@ data/
 .env
 *.log
 coverage/
+
+# scratch scripts
+.tmp/

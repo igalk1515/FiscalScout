@@ -81,6 +81,15 @@ describe("reading results", () => {
     expect(c.status).toBe("done");
     expect(c.counters.pages_done).toBeGreaterThan(5);
     expect(c.counters.contacts).toBe(1);
+    expect(c.counters.pages_broken).toBe(1);
+  });
+
+  it("GET /v1/crawls/:id/pages?status=broken lists the broken link and the page it was found on", async () => {
+    const res = await app.inject({ url: `/v1/crawls/${crawlId}/pages?status=broken` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([
+      expect.objectContaining({ url: `${site.url}/missing`, status: "failed", http_status: 404, parent_url: `${site.url}/` }),
+    ]);
   });
 
   it("GET /v1/links returns ranked links with sources, and filters by type and doc_type", async () => {

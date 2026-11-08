@@ -78,6 +78,30 @@ export function isEntityNamedHost(host: string, seedDomain: string): boolean {
   return sub.split(".").includes(label);
 }
 
+/**
+ * A mirror host: the page's canonical URL is the same path on another in-scope host, so the
+ * whole host is a copy of that site (boerneisd.smartsiteshost.com/244573_3 says it is
+ * www.boerneisd.net/244573_3). The home page alone is not enough: a campus subdomain's home page
+ * may point its canonical at the district's home page without being a copy of it.
+ */
+export function mirrorOf(pageUrl: string, canonical: string | null, scope: CrawlScope): { host: string; origin: string } | null {
+  if (!canonical || canonical === pageUrl || !inScope(canonical, scope)) return null;
+  const a = new URL(pageUrl);
+  const c = new URL(canonical);
+  if (a.host === c.host || a.pathname === "/") return null;
+  if (a.pathname !== c.pathname || a.search !== c.search) return null;
+  return { host: a.host, origin: c.origin };
+}
+
+/** Rewrites a URL on a known mirror host to the site it mirrors (host to origin). */
+export function unmirror(url: string, mirrors: Map<string, string>): string {
+  if (!mirrors.size) return url;
+  const u = new URL(url);
+  const origin = mirrors.get(u.host);
+  if (!origin) return url;
+  return normalizeUrl(`${u.pathname}${u.search}`, origin) ?? url;
+}
+
 const DOC_EXTENSIONS: Record<string, string> = {
   pdf: "pdf", xlsx: "xlsx", xls: "xls", xlsm: "xlsx", csv: "csv", docx: "docx", doc: "doc",
   pptx: "pptx", ppt: "ppt", txt: "txt", rtf: "rtf", zip: "zip", odt: "odt", ods: "ods",

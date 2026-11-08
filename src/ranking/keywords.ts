@@ -7,6 +7,12 @@ export const KeywordGroupSchema = z.object({
   synonyms: z.array(z.string().min(2).max(100)).max(50).default([]),
   /** "document" groups describe files; "contact" groups describe people's titles. */
   kind: z.enum(["document", "contact"]).default("document"),
+  /**
+   * Contact groups only: words of nearby titles that rank lower than the target itself.
+   * "Payroll Manager" is near "Finance Director". A related word counts only in a job title
+   * (with a word such as director, manager or specialist), not as a bare department name.
+   */
+  related: z.array(z.string().min(2).max(100)).max(50).optional(),
 });
 
 export const KeywordsSchema = z
@@ -63,6 +69,23 @@ export const DEFAULT_KEYWORDS: KeywordConfig = {
       "budget director",
       "business manager",
     ],
+    // The rest of the finance office, and purchasing: they rank below the finance director.
+    related: [
+      "business services",
+      "business office",
+      "business and finance",
+      "finance office",
+      "financial services",
+      "accounting",
+      "accountant",
+      "accounts payable",
+      "payroll",
+      "purchasing",
+      "procurement",
+      "budget",
+      "fiscal",
+      "treasury",
+    ],
   },
 };
 
@@ -72,6 +95,8 @@ export interface CompiledGroup {
   kind: "document" | "contact";
   terms: string[];
   textRes: { term: string; re: RegExp }[];
+  /** Contact groups: nearby titles, matched like terms but ranked lower. */
+  relatedRes: { term: string; re: RegExp }[];
 }
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -85,7 +110,15 @@ function termRegex(term: string): RegExp {
 export function compileKeywords(cfg: KeywordConfig): CompiledGroup[] {
   return Object.entries(cfg).map(([key, g]) => {
     const terms = [...new Set([key, ...g.synonyms].map((t) => t.trim().toLowerCase()).filter(Boolean))];
-    return { key, weight: g.weight, kind: g.kind, terms, textRes: terms.map((term) => ({ term, re: termRegex(term) })) };
+    const related = [...new Set((g.related ?? []).map((t) => t.trim().toLowerCase()).filter((t) => t && !terms.includes(t)))];
+    return {
+      key,
+      weight: g.weight,
+      kind: g.kind,
+      terms,
+      textRes: terms.map((term) => ({ term, re: termRegex(term) })),
+      relatedRes: related.map((term) => ({ term, re: termRegex(term) })),
+    };
   });
 }
 

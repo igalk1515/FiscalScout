@@ -25,6 +25,7 @@ const Counters = z.object({
   pages_queued: z.number(),
   pages_fetching: z.number(),
   pages_failed: z.number(),
+  pages_broken: z.number().describe("Failed pages that answered 404 or 410: broken links on the site"),
   pages_skipped: z.number(),
   results: z.number().describe("Links with a target score of at least 0.5"),
   documents: z.number(),
@@ -138,7 +139,10 @@ export const ContactOut = z.object({
 export const ContactsOut = z.object({ crawl: CrawlRef, data: z.array(ContactOut) });
 
 export const PagesQuery = z.object({
-  status: z.enum(["queued", "fetching", "done", "failed", "skipped"]).optional(),
+  status: z
+    .enum(["queued", "fetching", "done", "failed", "skipped", "broken"])
+    .optional()
+    .describe("'broken' is the failed pages that answered 404 or 410"),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().optional(),
 });
@@ -150,6 +154,7 @@ export const PageOut = z.object({
   http_status: z.number().nullable(),
   depth: z.number(),
   path_score: z.number(),
+  parent_url: z.string().nullable().describe("The page the link was found on"),
   attempts: z.number(),
   updated_at: z.string(),
 });

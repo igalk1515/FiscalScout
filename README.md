@@ -30,9 +30,9 @@ counts as found when it is in the top 10 of its type. Run it yourself with `npm 
 
 | Site | Crawl | Must-find (rules only) | Must-find (with LLM) | Precision@10, documents |
 |---|---|---|---|---|
-| Ann Arbor (a2gov.org) | 281 pages | 3/3 | 3/3 | 10/10 |
-| Boerne ISD (boerneisd.net) | 285 pages | 3/3 | 3/3 | 10/10 |
-| Arizona State University (asu.edu) | 293 pages | 3/3 | 3/3 | 8/10 |
+| Ann Arbor (a2gov.org) | 295 pages | 3/3 | 3/3 | 10/10 |
+| Boerne ISD (boerneisd.net) | 284 pages | 3/3 | 3/3 | 10/10 |
+| Arizona State University (asu.edu) | 290 pages | 3/3 | 3/3 | 8/10 |
 | Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - |
 
 What it found, first in each list:
@@ -48,7 +48,12 @@ Two details worth knowing: ASU's finance site is reached without a browser throu
 called "Jobs" (the host name `cfo.asu.edu` carries the signal), and ASU's CFO is read from JSON
 embedded in the page, because the card is drawn by a script.
 
-The LLM run of all three sites cost **$0.025** with `gpt-4o-mini`. Full details:
+Beyond the CFO, Boerne's crawl also returns the rest of the finance office, ranked below him:
+the purchasing director, the payroll manager, the assistant director of business services and
+the payroll specialists, each with an email checked against the page.
+
+The first LLM run of all three sites cost **$0.025** with `gpt-4o-mini`; the latest rerun cost
+$0.013, because answers seen before come from the cache. Full details:
 [eval/results.md](eval/results.md) (with LLM) and [eval/results-rules-only.md](eval/results-rules-only.md).
 
 ---
@@ -142,7 +147,9 @@ The fiscal year comes from the strongest pattern found: "June 30, 2025" or "6-30
 Keyword in the link text (+0.40 × weight), in the URL or **host name** (+0.30 × weight, which is
 how `cfo.asu.edu` behind a footer link called "Jobs" gets picked up), finance hub words such as
 finance, budget, transparency or treasurer (+0.25), navigation words such as departments or
-documents (+0.12), and 0.15 × the parent page's path score.
+documents (+0.12), and 0.15 × the parent page's path score. A link named for the office around
+a contact title, such as "Purchasing" or "Payroll", gets +0.25 × weight: that is where those
+people are listed.
 
 ### Keywords are set per crawl
 
@@ -152,12 +159,15 @@ documents (+0.12), and 0.15 × the parent page's path score.
   "keywords": {
     "acfr":             { "weight": 1.0, "kind": "document", "synonyms": ["cafr", "annual comprehensive financial report"] },
     "budget":           { "weight": 1.0, "kind": "document", "synonyms": ["adopted budget", "budget book"] },
-    "finance director": { "weight": 0.9, "kind": "contact",  "synonyms": ["chief financial officer", "cfo", "treasurer"] }
+    "finance director": { "weight": 0.9, "kind": "contact",  "synonyms": ["chief financial officer", "cfo", "treasurer"],
+                          "related": ["business services", "accounting", "payroll", "purchasing"] }
   }
 }
 ```
 
 The defaults cover ACFR, budget, single audit and finance director, with their usual synonyms.
+A contact group can also list `related` titles: the rest of the office around the target, which
+rank below it (see Contacts).
 Scores are stored per crawl, so two crawls of the same site with different keywords never
 overwrite each other.
 
@@ -186,8 +196,17 @@ continues on rules alone and emits an `llm.capped` event.
    a name on the line above the title, or "Title Name". With an LLM key, the LLM reads the block.
 3. **Verify:** every value must appear in the block. A value that is not on the page is dropped,
    so the model cannot invent a contact.
-4. **Score:** title weight, plus reachability (email, phone, email on the entity's domain) and
-   whether the page is a finance page.
+4. **Score:** how relevant the title is, times how complete the contact is.
+   - Relevance: the group's main titles (finance director, CFO) 1.0, its other synonyms 0.85,
+     a `related` title 0.6 for a leader (Purchasing Director, Payroll Manager) and 0.4 for staff
+     (Payroll Specialist), times the group weight. A related word counts only inside a job title:
+     "Payroll" alone is a department, not a person's title. Everyone else (HR, teachers) is not
+     kept unless the crawl's keywords ask for them.
+   - Completeness: email, an email on the entity's domain, phone, found on a finance page.
+
+   On Boerne this gives the CFO first (0.86), then the purchasing director and the payroll
+   manager (0.49), the assistant director of business services (0.46) and the payroll
+   specialists (0.32).
 
 Some sites draw their cards with scripts from JSON embedded in the page. The extractor reads
 that JSON too, which is how ASU's CFO is found without a browser.
@@ -197,15 +216,26 @@ that JSON too, which is how ASU's CFO is found without a browser.
 - **Queue:** the frontier is a Postgres table. Workers claim the best URL whose host is free
   with `FOR UPDATE SKIP LOCKED` and lease the host, so there is never more than one request at a
   time per host, at least a second apart, longer for slow hosts. 10% of claims explore at random.
+- **Share of the budget:** no host may use more than 30% of the page budget, so one large
+  subdomain (a university's online-degree site) cannot crowd out the rest. The entity's main
+  site is exempt: the seed's host, where the seed redirects, and the host a mirrored seed points
+  to.
 - **robots.txt:** per RFC 9309, cached for 24 hours. A 4xx means no rules; a 5xx or no answer
   means disallow everything. Crawl-delay, meta robots and `X-Robots-Tag` nofollow are honored.
 - **Scope:** the seed's registrable domain and its subdomains. Links to other domains are
   stored and ranked, never crawled. If the start page redirects to another domain, that domain
   joins the crawl. A vendor host that carries the entity's name (boerneisd.smartsiteshost.com)
   joins too.
+- **Mirror hosts:** the same site can answer under several host names. Boerne's pages are
+  served at `boerneisd.net`, `www.boerneisd.net` and `boerneisd.smartsiteshost.com`, and every
+  copy names the `www` URL as canonical. When a page's canonical link is the same path on
+  another in-scope host, the crawler marks its host as a mirror and reads every later URL on it
+  under the original host, so the seen check drops the copies. Before this, more than a quarter
+  of the Boerne budget went to copies (201 fetches for 121 distinct pages).
 - **Traps:** far-future calendar dates, repeating path segments, too many parameters, very long
   URLs. Duplicate content is detected by hash. Depth and page budget cap every crawl.
-- **Failures:** 4xx is final. Timeouts, network errors, 5xx and 429 are retried up to three
+- **Failures:** 4xx is final. A 404 or 410 is reported as a broken link, with the page it was
+  found on (`/v1/crawls/{id}/pages?status=broken`, and a list in the live view). Timeouts, network errors, 5xx and 429 are retried up to three
   times with backoff, honoring `Retry-After`. Five errors in a row pause a host. A site that
   refuses automated requests is reported as `blocked` and never bypassed.
 - **Honest identity:** `User-Agent: HighValueLinkScraper/0.1 (+https://github.com/igalk1515/high-value-link-scraper)`.
@@ -291,7 +321,7 @@ curl 'http://localhost:3000/v1/contacts?host=boerneisd.net&limit=1'
       "name": "Wesley Scott",
       "title": "Chief Financial Officer",
       "email": "wesley.scott@boerneisd.net",
-      "score": 0.9,
+      "score": 0.855,
       "source_url": "https://www.boerneisd.net/244573_3",
       "source_snippet": "Wesley Scott, CPA, RTSBA
 Chief Financial Officer
@@ -310,6 +340,7 @@ curl 'http://localhost:3000/v1/links?host=asu.edu&doc_type=acfr&limit=3'       #
 curl 'http://localhost:3000/v1/links?host=boerneisd.net&fiscal_year=2027'       # everything for FY2027
 curl 'http://localhost:3000/v1/links?host=a2gov.org&q=single+audit'             # full-text search
 curl 'http://localhost:3000/v1/crawls/<id>/pages?status=skipped'                # what was skipped, and why
+curl 'http://localhost:3000/v1/crawls/<id>/pages?status=broken'                 # broken links, with the page each was on
 ```
 
 Errors always look like this:
@@ -321,7 +352,7 @@ Errors always look like this:
 ### Live view
 
 Every step of a crawl is an event: `page.fetching`, `page.fetched`, `page.failed`,
-`page.skipped` (with the reason), `link.found`, `contact.found`, `scope.added`, `host.paused`,
+`page.skipped` (with the reason), `link.found`, `contact.found`, `scope.added`, `scope.mirror`, `host.paused`,
 `stats`, and `crawl.done`, `crawl.blocked` or `crawl.failed`. Events are stored in
 `crawl_events` and pushed to open streams. They also go out on a Postgres `NOTIFY` channel, so
 a crawl started from the command line shows up live in the API's watch page.

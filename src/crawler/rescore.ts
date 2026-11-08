@@ -4,9 +4,9 @@ import { compileKeywords, type KeywordConfig } from "../ranking/keywords.js";
 import { RANKER_VERSION, scoreLink } from "../ranking/rules.js";
 import { applyLlmTier } from "../ranking/tier.js";
 import * as repo from "../store/repo.js";
-import { extractPage, parseHtml } from "./extract.js";
+import { extractPage, type LinkCandidate, parseHtml } from "./extract.js";
 import { readRaw } from "./rawstore.js";
-import { hostOf, inScope, urlHash } from "./url.js";
+import { hostOf, inScope, mirrorOf, unmirror, urlHash } from "./url.js";
 
 /**
  * Ranks a finished crawl again from the raw pages saved on disk, without fetching anything:
@@ -20,10 +20,12 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
   if (!crawl) throw new Error(`crawl ${crawlId} not found`);
   const groups = compileKeywords(keywords ?? crawl.keywords);
   const scope = { domain: crawl.scope_domain, extraHosts: new Set(crawl.extra_hosts) };
+  // Pages the crawl read as copies of a page already read ("same content", "same page as") were
+  // not ranked during the crawl, so they are not ranked here either.
   const pages = await ctx.db.query<{ id: number; url: string; final_url: string | null; raw_path: string; path_score: number; depth: number }>(
     `select p.id, p.url, p.final_url, p.raw_path, f.path_score, f.depth
      from frontier f join pages p on p.url_hash = f.url_hash
-     where f.crawl_id = $1 and f.status = 'done' and p.raw_path is not null
+     where f.crawl_id = $1 and f.status = 'done' and p.raw_path is not null and coalesce(f.reason, '') not like 'same %'
      order by f.depth, f.path_score desc`,
     [crawlId],
   );
@@ -31,9 +33,8 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
   await ctx.db.query("delete from sightings where crawl_id = $1", [crawlId]);
   await ctx.db.query("delete from contacts where crawl_id = $1", [crawlId]);
 
-  let links = 0;
-  let contacts = 0;
   let missing = 0;
+  const read: { p: (typeof pages.rows)[number]; pageUrl: string; $: ReturnType<typeof parseHtml>; page: ReturnType<typeof extractPage> }[] = [];
   for (const p of pages.rows) {
     let html: string;
     try {
@@ -44,7 +45,29 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
     }
     const pageUrl = p.final_url ?? p.url;
     const $ = parseHtml(html);
-    const page = extractPage($, pageUrl);
+    read.push({ p, pageUrl, $, page: extractPage($, pageUrl) });
+  }
+  // Mirror hosts, learned from canonical links as during the crawl: their links count under the
+  // original host.
+  const mirrors = new Map<string, string>();
+  for (const { pageUrl, page } of read) {
+    const m = mirrorOf(pageUrl, page.canonical, scope);
+    if (m && !mirrors.has(m.host)) mirrors.set(m.host, m.origin);
+  }
+
+  let links = 0;
+  let contacts = 0;
+  for (const { p, pageUrl: fetchedUrl, $, page } of read) {
+    const pageUrl = mirrorOf(fetchedUrl, page.canonical, scope) ? page.canonical! : fetchedUrl;
+    if (mirrors.size) {
+      const byUrl = new Map<string, LinkCandidate>();
+      for (const l of page.links) {
+        const url = unmirror(l.url, mirrors);
+        const prev = byUrl.get(url);
+        if (!prev || (prev.boilerplate && !l.boilerplate)) byUrl.set(url, { ...l, url });
+      }
+      page.links = [...byUrl.values()];
+    }
     const all = page.links.map((link) => ({ link, s: scoreLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope) }) }));
     if (llm) await applyLlmTier(llm, groups, all); // answers seen before come from the cache, free
     const scored = all.filter((x) => x.s.targetScore > 0);
@@ -98,5 +121,5 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
       contacts += fresh.length;
     }
   }
-  return { pages: pages.rows.length, links, contacts, missing };
+  return { pages: pages.rows.length, links, contacts, missing, mirrors: [...mirrors.keys()] };
 }

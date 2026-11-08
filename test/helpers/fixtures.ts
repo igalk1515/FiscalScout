@@ -18,6 +18,9 @@ export const FIXTURES = {
   boerne_bfs: ["boerne-business-financial-services.html", "https://www.boerneisd.net/244573_3"],
   boerne_transparency: ["boerne-financial-transparency.html", "https://www.boerneisd.net/82152_4"],
   boerne_afr: ["boerne-annual-financial-reports.html", "https://www.boerneisd.net/82157_4"],
+  boerne_payroll: ["boerne-payroll.html", "https://www.boerneisd.net/256834_3"],
+  boerne_purchasing: ["boerne-purchasing.html", "https://www.boerneisd.net/purchasing"],
+  boerne_business_contact: ["boerne-business-services-contact.html", "https://www.boerneisd.net/256840_3"],
   boerne_budgets: ["boerne-adopted-budgets.html", "https://www.boerneisd.net/82153_4"],
   cleargov: ["cleargov-budget.html", "https://city-ann-arbor-mi-cleardoc.cleargov.com/23859/930791/d"],
 } as const;

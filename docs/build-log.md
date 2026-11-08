@@ -209,6 +209,39 @@ data model, tests, known limits and the scale-out design. `docker compose build 
 image; a container started from it answered `/health`, served the OpenAPI document (8 paths)
 and the start page.
 
+## Review after the build (Nov 8, afternoon)
+
+Igal watched a new Boerne crawl in the live view and asked three questions. Each led to a fix.
+
+- **Why was a host skipped for using its share of the budget?** Because Boerne's site answers
+  under three host names (`boerneisd.net`, `www.boerneisd.net`, `boerneisd.smartsiteshost.com`)
+  and the crawl read it three times: 201 fetches for 121 distinct pages. Content hashes did not
+  catch it, since each copy prints its own host in the HTML. Every copy names the `www` URL as
+  canonical, so the crawler now learns a mirror host from the first non-home page whose
+  canonical is the same path on another in-scope host, and reads every later URL on it under
+  the original host. Test: one site served as `127.0.0.1` and `localhost`; the copy is fetched
+  once and no page twice.
+
+  The first crawl with this fix showed a side effect. With the copies gone, the main site sat
+  on one host and hit the 30% share of the budget at 90 pages; 161 of its pages were skipped,
+  among them the purchasing and business services pages, and the budget went to elementary
+  school sites. The main site (the seed's host, its redirect target, and the host a mirrored
+  seed points to) is now exempt from the share, and links named for the office around a
+  contact ("Purchasing", "Payroll") get a path score, so the crawl visits them.
+- **Is the CFO the only contact?** No. The site also lists the assistant director of business
+  services, the purchasing director and the payroll team. Contacts were kept only when their
+  title matched the contact keywords exactly. Now a contact group can list `related` titles
+  (business services, accounting, payroll, purchasing, budget...), and the score is relevance
+  times completeness, so the CFO stays first and the office follows: leaders at 0.6 relevance,
+  staff at 0.4. A related word counts only in a job title ("Payroll Manager", not a "Payroll"
+  menu item). Fixes found on the way: a department mailbox next to a person (purchasing@) no
+  longer stops the block from reaching that person's own email, and is never given to a person
+  as their email; "Office of the State Treasurer" is the name of an office, not a title; a
+  former CFO ranks far below the current one.
+- **Failed pages should say they are broken links.** 404 and 410 now count as broken links,
+  in a counter of their own, a list in the live view with the page each was found on, and
+  `/v1/crawls/{id}/pages?status=broken`. Every counter in the live view explains itself on hover.
+
 ## Not done
 
 - **Step 13, if time:** a headless browser for pages drawn entirely by scripts. Not needed for

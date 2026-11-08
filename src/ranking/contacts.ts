@@ -28,12 +28,28 @@ export interface ContactContext {
 
 const MAX_BLOCK = 500;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const EMAIL_ONLY = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
 const PHONE_RE = /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?:\s*(?:x|ext\.?)\s*\d{1,6})?/gi;
 const HONORIFIC = /^(dr|mr|mrs|ms|miss|prof|hon)\.?\s+/i;
 const TITLE_WORDS =
-  /^(executive|vice|president|chief|director|officer|treasurer|manager|controller|comptroller|assistant|deputy|senior|associate|superintendent|coordinator|specialist|analyst|accountant|supervisor|head|dean|provost|cfo|ceo|coo|cio|business|finance|financial|budget|interim|acting|administrator|clerk)$/i;
+  /^(executive|vice|president|chief|director|officer|treasurer|manager|controller|comptroller|assistant|deputy|senior|associate|superintendent|coordinator|specialist|analyst|accountant|supervisor|head|dean|provost|cfo|ceo|coo|cio|business|finance|financial|budget|interim|acting|administrator|clerk|secretary|buyer|technician|bookkeeper|auditor|payroll|purchasing|procurement|accounting)$/i;
 const NOT_NAME_WORDS =
-  /^(department|office|services?|city|county|district|school|university|college|institute|center|centre|foundation|enterprise|learning|research|park|hall|building|campus|program|programs|chart|org|organization|plan|report|reports|budget|finance|financial|contact|us|email|phone|fax|address|street|suite|hours|monday|tuesday|wednesday|thursday|friday|the|and|of|for|staff|directory|board|team|division|information|welcome|learn|more|view|leadership|careers|jobs|online|news|about|home|page)$/i;
+  /^(department|office|services?|city|county|district|school|university|college|institute|center|centre|foundation|enterprise|learning|research|park|hall|building|campus|program|programs|chart|org|organization|plan|report|reports|budget|finance|financial|contact|us|email|phone|fax|address|street|suite|hours|monday|tuesday|wednesday|thursday|friday|the|and|of|for|staff|directory|board|team|division|information|welcome|learn|more|view|leadership|careers|jobs|online|news|about|home|page|human|resources|accounts|payable|receivable|benefits|operations|transportation|technology|nutrition|maintenance|facilities|communications|education|special|employees?)$/i;
+/** A job title has a role word; "Payroll" alone is a department, "Payroll Manager" a person's title. */
+const ROLE_WORD =
+  /(?<![a-z])(chief|director|manager|officer|head|supervisor|coordinator|specialist|analyst|accountant|bookkeeper|auditor|clerk|secretary|assistant|administrator|controller|comptroller|treasurer|buyer|agent|technician|superintendent|cfo)(?![a-z])/i;
+/** Titles that lead a team rank above the staff in it. */
+const LEADER_WORD = /(?<![a-z])(chief|director|manager|officer|head|supervisor|administrator|controller|comptroller|treasurer|superintendent|cfo)(?![a-z])/i;
+const DEPUTY_WORD = /(?<![a-z])(assistant|deputy|associate)(?![a-z])/i;
+/** Someone who no longer holds the title. */
+const FORMER_WORD = /(?<![a-z])(former|retired|emerit(us|a))(?![a-z])/i;
+/** The name of an office, not a person's title: "Office of the State Treasurer", "Treasurer's Office". */
+const OFFICE_NAME =
+  /(office|department|bureau|division) of (the )?([a-z]+ ){0,2}(treasurer|controller|comptroller|finance|budget)\b|(treasurer|controller|comptroller)['’]s office/gi;
+/** Department mailboxes: a way to reach an office, not a person's own email. */
+const SHARED_LOCAL =
+  /^(info|contact|contactus|webmaster|web|admin|office|help|helpdesk|support|hr|humanresources|payroll|purchasing|procurement|finance|accounting|accountspayable|ap|budget|business|businessoffice|questions|communications|media|press|records|openrecords|mail|general|customerservice|customer\.service|no-?reply)$/i;
+const isShared = (email: string) => SHARED_LOCAL.test(email.split("@")[0] ?? "");
 
 /** A person's name: two to four capitalized words, initials allowed, after honorifics and credentials are removed. */
 export function cleanName(raw: string): string | null {
@@ -53,12 +69,36 @@ export function cleanName(raw: string): string | null {
   return tokens.join(" ");
 }
 
-function titleMatch(groups: CompiledGroup[], text: string): { term: string; group: CompiledGroup } | null {
-  for (const g of groups) {
-    const term = matchText(g, text);
-    if (term) return { term, group: g };
-  }
+export interface TitleMatch {
+  term: string;
+  group: CompiledGroup;
+  re: RegExp;
+  /** Matched a nearby title (payroll, purchasing), not the target title itself. */
+  related: boolean;
+}
+
+/** The target titles of every group first; nearby titles only inside a job title. */
+export function titleMatch(groups: CompiledGroup[], raw: string): TitleMatch | null {
+  if (!raw) return null;
+  const text = raw.replace(OFFICE_NAME, " ");
+  for (const g of groups) for (const { term, re } of g.textRes) if (re.test(text)) return { term, group: g, re, related: false };
+  if (!ROLE_WORD.test(text)) return null;
+  for (const g of groups) for (const { term, re } of g.relatedRes) if (re.test(text)) return { term, group: g, re, related: true };
   return null;
+}
+
+/**
+ * How close a title is to what the group asks for, from 0 to 1: the group's main titles 1.0,
+ * its other titles 0.85, a nearby title 0.6 for a leader and 0.4 for staff. An assistant or
+ * deputy of the target ("Assistant Finance Director") ranks a step below the target, and a
+ * former holder of a title far below.
+ */
+export function titleRelevance(m: TitleMatch, title: string | null): number {
+  const t = title ?? "";
+  let r = m.related ? (LEADER_WORD.test(t) ? 0.6 : 0.4) : m.group.terms.slice(0, 3).includes(m.term) ? 1 : 0.85;
+  if (!m.related && DEPUTY_WORD.test(t)) r *= 0.85;
+  if (FORMER_WORD.test(t)) r *= 0.3;
+  return r;
 }
 
 interface Parsed {
@@ -102,7 +142,7 @@ export function parseContactLines(block: string, groups: CompiledGroup[]): Parse
       }
     }
     // (d) "... Chief Financial Officer Marti Praschan ..." inside a sentence
-    const re = m.group.textRes.find((x) => x.term === m.term)!.re;
+    const re = m.re;
     const at = line.search(re);
     if (at >= 0) {
       const after = line.slice(at).replace(re, "");
@@ -133,9 +173,17 @@ export function verifyAgainstBlock(c: LlmContact, block: string): LlmContact | n
   const name = c.name ? cleanName(c.name) : null;
   if (!name || !text.includes(name.toLowerCase())) return null;
   const titleOk = c.title && c.title.split(/\W+/).filter((w) => w.length >= 3).every((w) => text.includes(w.toLowerCase()));
-  const emailOk = c.email && text.includes(c.email.toLowerCase());
+  // A real address only: "[email protected]" is what a page shows in place of an email it hides
+  // from bots, and hidden emails stay hidden.
+  const emailOk = c.email && EMAIL_ONLY.test(c.email) && text.includes(c.email.toLowerCase()) && !isShared(c.email);
   const phoneOk = c.phone && digits(c.phone).length >= 7 && digits(block).includes(digits(c.phone));
   return { name, title: titleOk ? cleanText(c.title!) : null, email: emailOk ? c.email!.toLowerCase() : null, phone: phoneOk ? c.phone! : null };
+}
+
+/** Email links of people in an element: a department mailbox (purchasing@, info@) is not a second person. */
+function personalMailtos($: CheerioAPI, el: Element): number {
+  const links = $(el).find('a[href^="mailto:" i]').add($(el).is('a[href^="mailto:" i]') ? el : []);
+  return links.filter((_, a) => !isShared(($(a).attr("href") ?? "").replace(/^mailto:\s*/i, "").split("?")[0]!)).length;
 }
 
 /** Finds small blocks of page text around titles and email links. */
@@ -162,8 +210,7 @@ function candidateBlocks($: CheerioAPI, groups: CompiledGroup[]): string[] {
     while (cur && cur.type === "tag") {
       const len = cleanText($(cur).text()).length;
       if (len > MAX_BLOCK) break;
-      const mailtos = $(cur).find('a[href^="mailto:" i]').length + ($(cur).is('a[href^="mailto:" i]') ? 1 : 0);
-      if (mailtos > 1 && cur !== seed) break;
+      if (personalMailtos($, cur) > 1 && cur !== seed) break;
       best = cur;
       cur = cur.parent as Element | null;
     }
@@ -205,10 +252,10 @@ export function nearestReach(block: string, name: string, people: number): { ema
   const lines = block.split("\n");
   const nameAt = Math.max(0, lines.findIndex((l) => l.includes(name.split(" ")[0]!)));
   const parts = name.toLowerCase().split(" ").filter((p) => p.length > 1 && !p.endsWith("."));
-  const allEmails = (block.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase());
+  const allEmails = (block.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase()).filter((e) => !isShared(e));
   const named = allEmails.find((e) => parts.some((p) => e.split("@")[0]!.includes(p)));
   const window = lines.slice(nameAt, nameAt + 5).join("\n");
-  const nearEmail = (window.match(EMAIL_RE) ?? [])[0]?.toLowerCase() ?? null;
+  const nearEmail = (window.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase()).find((e) => !isShared(e)) ?? null;
   const nearPhone = (window.match(PHONE_RE) ?? [])[0] ?? null;
   const single = people === 1;
   return {
@@ -217,17 +264,17 @@ export function nearestReach(block: string, name: string, people: number): { ema
   };
 }
 
-function scoreContact(c: { title: string | null; email: string | null; phone: string | null }, group: CompiledGroup | null, ctx: ContactContext): number {
-  const w = group?.weight ?? 0.5;
-  const primary = group && c.title ? group.terms.slice(0, 3).some((t) => matchText({ ...group, textRes: group.textRes.filter((r) => r.term === t) }, c.title!)) : false;
-  const sameDomain = !!c.email && c.email.toLowerCase().endsWith(`@${ctx.entityDomain}`) || (!!c.email && c.email.toLowerCase().endsWith(`.${ctx.entityDomain}`));
-  const s =
-    0.5 * w +
-    (c.email ? 0.15 : 0) +
-    (sameDomain ? 0.05 : 0) +
-    (c.phone ? 0.05 : 0) +
-    (ctx.pagePathScore >= 0.5 ? 0.15 : 0) +
-    (primary ? 0.1 : 0);
+/**
+ * Score = how relevant the title is (group weight x title relevance) x how complete and
+ * trustworthy the contact is (email, an email on the entity's domain, phone, found on a
+ * finance page). Relevance comes first: a payroll clerk with every detail still ranks below
+ * the finance director without an email.
+ */
+function scoreContact(c: { title: string | null; email: string | null; phone: string | null }, m: TitleMatch, ctx: ContactContext): number {
+  const email = c.email?.toLowerCase() ?? "";
+  const sameDomain = !!email && (email.endsWith(`@${ctx.entityDomain}`) || email.endsWith(`.${ctx.entityDomain}`));
+  const quality = Math.min(1, 0.6 + (email ? 0.2 : 0) + (sameDomain ? 0.05 : 0) + (c.phone ? 0.05 : 0) + (ctx.pagePathScore >= 0.5 ? 0.1 : 0));
+  const s = m.group.weight * titleRelevance(m, c.title) * quality;
   return Math.round(Math.min(1, s) * 1000) / 1000;
 }
 
@@ -259,13 +306,14 @@ export async function findContacts($: CheerioAPI, dataBlocks: string[], ctx: Con
     for (const p of people) {
       if (p.title) p.title = cleanTitle(p.title, p.name);
       const m = p.title ? titleMatch(groups, p.title) : titleMatch(groups, block);
-      if (!m) continue; // not a finance title
+      if (!m) continue; // not a relevant title
+      if (m.related && !p.title) continue; // a nearby title must be the person's own title
       const contact: Contact = {
         name: p.name,
         title: p.title,
         email: p.email,
         phone: p.phone,
-        score: scoreContact(p, m.group, ctx),
+        score: scoreContact(p, m, ctx),
         matchedKeywords: [m.term],
         snippet: block.slice(0, 600),
         decidedBy: p.by,
@@ -277,7 +325,8 @@ export async function findContacts($: CheerioAPI, dataBlocks: string[], ctx: Con
         // Merge: keep what each sighting knows.
         const longerTitle = contact.title && (!prev.title || contact.title.length > prev.title.length) ? contact.title : prev.title;
         const merged = { ...prev, email: prev.email ?? contact.email, phone: prev.phone ?? contact.phone, title: longerTitle };
-        merged.score = Math.max(prev.score, contact.score, scoreContact(merged, m.group, ctx));
+        const mm = (merged.title && titleMatch(groups, merged.title)) || m;
+        merged.score = Math.max(prev.score, contact.score, scoreContact(merged, mm, ctx));
         found.set(key, merged);
       }
     }

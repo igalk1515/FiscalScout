@@ -132,6 +132,17 @@ describe("rules scoring on the test sites", () => {
     expect(rfp.supportingPaper).toBe(true);
   });
 
+  it("a link named for the office around a contact ('Purchasing') is worth visiting, an unrelated link is not", () => {
+    const base = { titleAttr: "", heading: "", context: "", boilerplate: false, nofollow: false, source: "html" as const };
+    const ctx = { groups, parentPathScore: 0, internal: true, now: NOW };
+    const purchasing = scoreLink({ ...base, url: "https://www.boerneisd.net/258424_3", anchor: "Purchasing" }, ctx);
+    const unrelated = scoreLink({ ...base, url: "https://www.boerneisd.net/123_1", anchor: "Athletics" }, ctx);
+    expect(purchasing.pathScore).toBeGreaterThanOrEqual(0.2);
+    expect(purchasing.reason).toMatch(/purchasing/);
+    expect(purchasing.targetScore).toBe(0);
+    expect(unrelated.pathScore).toBeLessThan(0.15);
+  });
+
   it("keywords are per crawl: with other keywords the ACFR is no longer a result", () => {
     const police = compileKeywords({ "body cameras": { weight: 1, kind: "document", synonyms: ["body-worn camera"] } });
     const acfr = scored("a2gov_reports", 0.9, police).find((x) => x.link.url.endsWith("6-30-25-acfr-final.pdf"))!;

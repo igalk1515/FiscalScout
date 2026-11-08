@@ -146,6 +146,15 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
       pNotes.push("heading names it");
     }
     if (p > bestPath.value) bestPath = { value: p, notes: pNotes };
+
+    // A page named for the office around a contact ("Purchasing", "Payroll") is where those
+    // people are listed: worth visiting, a step below the contact's own title.
+    if (g.kind === "contact" && !inAnchor) {
+      const near = g.relatedRes.find((r) => r.re.test(anchor));
+      if (near && 0.25 * g.weight > bestPath.value) {
+        bestPath = { value: 0.25 * g.weight, notes: [`'${near.term}' in the link text, an office near '${g.key}'`] };
+      }
+    }
   }
 
   // ---- target score

@@ -6,7 +6,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, startCrawl } from "../app.js";
-import { normalizeUrl } from "../crawler/url.js";
+import { hostOf, normalizeUrl, registrableDomain } from "../crawler/url.js";
 import * as repo from "../store/repo.js";
 
 interface Expect {
@@ -50,11 +50,12 @@ const details: string[] = [];
 let found = 0;
 let total = 0;
 for (const site of spec.sites) {
-  // The latest finished crawl that started from the site's home page, at depth 1 or more.
+  // The latest finished crawl of the site's domain (from www.boerneisd.net or boerneisd.net
+  // alike), at depth 1 or more.
   const latest = await ctx.db.query<repo.CrawlRow>(
-    `select * from crawls where seed_url = $1 and max_depth >= 1 and status in ('done', 'blocked', 'failed')
+    `select * from crawls where scope_domain = $1 and max_depth >= 1 and status in ('done', 'blocked', 'failed')
      order by created_at desc limit 1`,
-    [normalizeUrl(site.seed)],
+    [registrableDomain(hostOf(normalizeUrl(site.seed)!))],
   );
   const crawl = latest.rows[0];
   if (!crawl) {

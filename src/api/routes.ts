@@ -48,6 +48,7 @@ async function crawlView(ctx: AppContext, c: repo.CrawlRow): Promise<z.infer<typ
       pages_queued: k.pages_queued,
       pages_fetching: k.pages_fetching,
       pages_failed: k.pages_failed,
+      pages_broken: k.pages_broken,
       pages_skipped: k.pages_skipped,
       results: k.results,
       documents: k.documents,
@@ -161,9 +162,10 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
       if (!crawl) throw new NotFound("crawl not found");
       const cur = decodeCursor<{ s: number; u: string }>(req.query.cursor);
       const r = await ctx.db.query(
-        `select url, status, reason, http_status, depth, path_score, attempts, updated_at
+        `select url, status, reason, http_status, depth, path_score, parent_url, attempts, updated_at
          from frontier
-         where crawl_id = $1 and ($2::text is null or status = $2)
+         where crawl_id = $1
+           and ($2::text is null or status = $2 or ($2 = 'broken' and status = 'failed' and http_status in (404, 410)))
            and ($3::real is null or (path_score, url) < ($3::real, $4::text))
          order by path_score desc, url desc
          limit $5`,
