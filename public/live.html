@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live crawl</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --surface: #fff; --fg: #18202b; --muted: #5d6878; --line: #dde2e9;
+    --accent: #1d5fa8; --ok: #217047; --warn: #9b5c00; --bad: #b42318; --star: #a15c00;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e131a; --surface: #151c26; --fg: #e3e8ef; --muted: #98a3b3; --line: #273140;
+            --accent: #7fb2ec; --ok: #6cc796; --warn: #f0b45e; --bad: #f08a80; --star: #f0b45e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 18px 20px 6px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; word-break: break-all; }
+  .pill { font: 600 11px/1 system-ui; letter-spacing: .05em; text-transform: uppercase; padding: 5px 8px; border-radius: 99px; border: 1px solid var(--line); }
+  .pill.running { color: var(--accent); border-color: var(--accent); }
+  .pill.done { color: var(--ok); border-color: var(--ok); }
+  .pill.blocked, .pill.failed { color: var(--bad); border-color: var(--bad); }
+  .muted { color: var(--muted); }
+  .detail { padding: 0 20px; color: var(--muted); }
+  .now { margin: 8px 20px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; padding: 8px 20px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 20px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; padding: 8px 20px 24px; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #feed { max-height: 62vh; overflow: auto; font-family: var(--mono); font-size: 12px; }
+  .row { display: grid; grid-template-columns: 52px 62px minmax(0, 1fr) auto; gap: 8px; padding: 4px 12px; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .row .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); } .star { color: var(--star); font-weight: 600; }
+  ol { margin: 0; padding: 8px 12px 10px 32px; }
+  li { margin: 6px 0; }
+  li a { color: var(--accent); word-break: break-all; }
+  .score { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .empty { padding: 10px 12px; color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="seed">Loading…</h1>
+  <span id="status" class="pill">…</span>
+  <span id="elapsed" class="muted"></span>
+  <a id="api" class="muted" href="#">JSON</a>
+</header>
+<div id="detail" class="detail"></div>
+<div class="now"><span class="muted">Now</span> <span id="now">–</span></div>
+<div class="grid">
+  <div class="stat"><b id="c-done">0</b><span>pages done</span></div>
+  <div class="stat"><b id="c-queued">0</b><span>queued</span></div>
+  <div class="stat"><b id="c-failed">0</b><span>failed</span></div>
+  <div class="stat"><b id="c-skipped">0</b><span>skipped</span></div>
+  <div class="stat"><b id="c-documents">0</b><span>documents ≥ 0.5</span></div>
+  <div class="stat"><b id="c-contacts">0</b><span>contacts</span></div>
+  <div class="stat"><b id="c-llm">off</b><span>LLM calls · cost</span></div>
+</div>
+<main>
+  <section>
+    <h2>Live feed</h2>
+    <div id="feed"><div class="empty">Waiting for events…</div></div>
+  </section>
+  <div style="display:grid; gap:14px; align-content:start; min-width:0">
+    <section><h2>Best documents so far</h2><ol id="docs"></ol><div id="docs-empty" class="empty">None yet</div></section>
+    <section><h2>Contacts</h2><ol id="contacts"></ol><div id="contacts-empty" class="empty">None yet</div></section>
+  </div>
+</main>
+<script>
+  const id = location.pathname.split("/").filter(Boolean).pop();
+  const $ = (s) => document.getElementById(s);
+  const feed = $("feed");
+  let started = null, finishedAt = null, llmOn = false, first = true;
+
+  const shortUrl = (u) => { try { const x = new URL(u); return x.host + x.pathname + x.search; } catch { return u; } };
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function addRow(col1, cls1, col2, url, note, noteCls = "muted") {
+    if (first) { feed.innerHTML = ""; first = false; }
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="${cls1}">${esc(col1)}</span><span class="muted">${esc(col2)}</span><span class="u" title="${esc(url)}">${esc(shortUrl(url))}</span><span class="${noteCls}">${esc(note)}</span>`;
+    feed.prepend(row);
+    while (feed.children.length > 400) feed.lastChild.remove();
+  }
+
+  function setStatus(status, detail) {
+    const el = $("status");
+    el.textContent = status;
+    el.className = "pill " + status;
+    $("detail").textContent = detail || "";
+    if (["done", "blocked", "failed"].includes(status)) { finishedAt = finishedAt || Date.now(); $("now").textContent = "–"; }
+  }
+
+  function setCounters(c) {
+    $("c-done").textContent = c.pages_done;
+    $("c-queued").textContent = c.pages_queued;
+    $("c-failed").textContent = c.pages_failed;
+    $("c-skipped").textContent = c.pages_skipped;
+    $("c-documents").textContent = c.documents;
+    $("c-contacts").textContent = c.contacts;
+    $("c-llm").textContent = llmOn ? `${c.llm_calls} · $${Number(c.llm_cost_usd).toFixed(3)}` : "off";
+    if (c.now_fetching && c.now_fetching.length) $("now").textContent = c.now_fetching.map(shortUrl).join("  ·  ");
+  }
+
+  async function refreshResults() {
+    const [docs, contacts] = await Promise.all([
+      fetch(`/v1/links?crawl_id=${id}&type=document&min_score=0.5&limit=8`).then((r) => r.json()),
+      fetch(`/v1/contacts?crawl_id=${id}&limit=6`).then((r) => r.json()),
+    ]);
+    $("docs").innerHTML = (docs.data || []).map((d) =>
+      `<li><span class="score">${d.target_score.toFixed(2)} · ${esc(d.doc_type || "-")}${d.fiscal_year ? " · FY" + d.fiscal_year : ""}</span><br><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.label || shortUrl(d.url))}</a></li>`).join("");
+    $("docs-empty").style.display = docs.data && docs.data.length ? "none" : "block";
+    $("contacts").innerHTML = (contacts.data || []).map((c) =>
+      `<li><b>${esc(c.name)}</b> <span class="score">${c.score.toFixed(2)}</span><br>${esc(c.title || "")}${c.email ? `<br><a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ""}${c.phone ? `<br>${esc(c.phone)}` : ""}</li>`).join("");
+    $("contacts-empty").style.display = contacts.data && contacts.data.length ? "none" : "block";
+  }
+
+  async function init() {
+    $("api").href = `/v1/crawls/${id}`;
+    const crawl = await fetch(`/v1/crawls/${id}`).then((r) => r.json());
+    if (crawl.error) { $("seed").textContent = crawl.error.message; return; }
+    document.title = "Live: " + shortUrl(crawl.seed_url);
+    $("seed").textContent = shortUrl(crawl.seed_url);
+    started = crawl.started_at ? Date.parse(crawl.started_at) : Date.now();
+    if (crawl.finished_at) finishedAt = Date.parse(crawl.finished_at);
+    setStatus(crawl.status, crawl.status_detail);
+    setCounters(crawl.counters);
+    await refreshResults();
+
+    const es = new EventSource(`/v1/crawls/${id}/events`);
+    const on = (type, fn) => es.addEventListener(type, (m) => fn(JSON.parse(m.data)));
+    on("crawl.started", (d) => { llmOn = !!d.llm; addRow("start", "ok", "", d.seed, `depth ${d.max_depth} · budget ${d.page_budget}`); });
+    on("page.fetching", (d) => { $("now").textContent = `${shortUrl(d.url)}   depth ${d.depth} · path ${Number(d.path_score).toFixed(2)}`; });
+    on("page.fetched", (d) => addRow(d.status, "ok", d.ms + " ms", d.url,
+      d.document ? `document (${d.document})` : d.duplicate ? "same content" : `${d.links} links${d.results ? " · " + d.results + " results" : ""}${d.needs_browser ? " · needs browser" : ""}`));
+    on("page.failed", (d) => addRow(d.retrying ? "retry" : "fail", d.retrying ? "warn" : "bad", d.status || "", d.url, d.reason, d.retrying ? "warn" : "bad"));
+    on("page.skipped", (d) => addRow("skip", "warn", "", d.url, d.reason, "muted"));
+    on("scope.added", (d) => addRow("scope", "ok", "", d.host, d.reason));
+    on("host.paused", (d) => addRow("pause", "bad", "", d.host, `paused after errors · ${d.skipped} skipped`, "bad"));
+    on("link.found", (d) => { addRow("★ " + (d.doc_type || "link"), "star", Number(d.score).toFixed(2), d.url, d.fiscal_year ? "FY" + d.fiscal_year : "", "star"); });
+    on("contact.found", (d) => addRow("★ contact", "star", Number(d.score).toFixed(2), d.page, `${d.name} · ${d.title || ""}`, "star"));
+    on("stats", (d) => setCounters(d));
+    for (const end of ["crawl.done", "crawl.blocked", "crawl.failed"]) {
+      on(end, (d) => { setStatus(end.split(".")[1], d.detail); addRow("end", end === "crawl.done" ? "ok" : "bad", "", crawl.seed_url, d.detail || end); refreshResults(); es.close(); });
+    }
+    setInterval(() => { if (!finishedAt) refreshResults(); }, 5000);
+  }
+
+  setInterval(() => {
+    if (!started) return;
+    const s = Math.round(((finishedAt || Date.now()) - started) / 1000);
+    $("elapsed").textContent = `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  }, 1000);
+  init();
+</script>
+</body>
+</html>

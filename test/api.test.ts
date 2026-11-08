@@ -1,0 +1,185 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { FastifyInstance } from "fastify";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildServer } from "../src/api/server.js";
+import { type AppContext, createContext } from "../src/app.js";
+import type { Db } from "../src/db/client.js";
+import { createLlm, memoryCache } from "../src/ranking/llm.js";
+import { startCitySite } from "./helpers/city-site.js";
+import { silentLog, testDb } from "./helpers/db.js";
+
+let db: Db;
+let ctx: AppContext;
+let app: FastifyInstance;
+let site: Awaited<ReturnType<typeof startCitySite>>;
+let crawlId: string;
+
+beforeAll(async () => {
+  db = await testDb();
+  site = await startCitySite();
+  ctx = await createContext({
+    db,
+    log: silentLog,
+    llm: createLlm({ model: "none", baseUrl: "http://unused", cache: memoryCache() }),
+    config: { CRAWL_WORKERS: 2, MIN_HOST_DELAY_MS: 30, RAW_DIR: mkdtempSync(join(tmpdir(), "raw-")) },
+  });
+  app = await buildServer(ctx);
+  const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}/`, max_depth: 3, page_budget: 40 } });
+  crawlId = res.json().id;
+  await ctx.runner.start(crawlId);
+});
+
+afterAll(async () => {
+  await app?.close();
+  await ctx?.close();
+  await site?.close();
+  await db?.end();
+});
+
+describe("POST /v1/crawls", () => {
+  it("answers 202 with the crawl, its counters and its links", async () => {
+    const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}/finance`, max_depth: 0 } });
+    expect(res.statusCode).toBe(202);
+    const body = res.json();
+    expect(body).toMatchObject({ status: "queued", max_depth: 0, page_budget: 300 });
+    expect(body.links.live).toBe(`/live/${body.id}`);
+    expect(res.headers.location).toBe(`/v1/crawls/${body.id}`);
+    await ctx.runner.start(body.id);
+  });
+
+  it("validates input with one error shape", async () => {
+    const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: "not a url" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatchObject({ code: "invalid_parameter", param: "url" });
+    const bad = await app.inject({
+      method: "POST",
+      url: "/v1/crawls",
+      payload: { url: `${site.url}/`, keywords: { budget: { weight: 3 } } },
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error.param).toBe("keywords.budget.weight");
+  });
+
+  it("replays the same crawl for the same Idempotency-Key", async () => {
+    const send = () =>
+      app.inject({ method: "POST", url: "/v1/crawls", headers: { "idempotency-key": "k-1" }, payload: { url: `${site.url}/poverty`, max_depth: 0 } });
+    const a = await send();
+    const b = await send();
+    expect(b.json().id).toBe(a.json().id);
+    expect(b.headers["idempotent-replayed"]).toBe("true");
+    await ctx.runner.start(a.json().id);
+  });
+});
+
+describe("reading results", () => {
+  it("GET /v1/crawls/:id shows the finished crawl and its counters", async () => {
+    const res = await app.inject({ url: `/v1/crawls/${crawlId}` });
+    expect(res.statusCode).toBe(200);
+    const c = res.json();
+    expect(c.status).toBe("done");
+    expect(c.counters.pages_done).toBeGreaterThan(5);
+    expect(c.counters.contacts).toBe(1);
+  });
+
+  it("GET /v1/links returns ranked links with sources, and filters by type and doc_type", async () => {
+    const res = await app.inject({ url: `/v1/links?crawl_id=${crawlId}&type=document&min_score=0.5` });
+    expect(res.statusCode).toBe(200);
+    const { data, crawl } = res.json();
+    expect(crawl.id).toBe(crawlId);
+    expect(data.length).toBeGreaterThanOrEqual(3);
+    const scores = data.map((d: { target_score: number }) => d.target_score);
+    expect(scores).toEqual([...scores].sort((a, b) => b - a));
+    expect(data.every((d: { type: string }) => d.type === "document")).toBe(true);
+    const acfr = data.find((d: { url: string }) => d.url.endsWith("city-acfr-2025.pdf"));
+    expect(acfr.sources[0]).toMatchObject({ anchor_text: "Fiscal Year 2025", section_heading: "Annual Comprehensive Financial Report (ACFR)" });
+    expect(acfr.reason).toMatch(/heading/);
+
+    const budgets = await app.inject({ url: `/v1/links?crawl_id=${crawlId}&doc_type=budget` });
+    expect(budgets.json().data.every((d: { doc_type: string }) => d.doc_type === "budget")).toBe(true);
+  });
+
+  it("reads the latest crawl of a host when no crawl_id is given", async () => {
+    const latest = (await app.inject({ url: "/v1/crawls?limit=1" })).json().data[0];
+    const res = await app.inject({ url: `/v1/links?host=127.0.0.1&limit=1` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().crawl.id).toBe(latest.id);
+  });
+
+  it("pages with a cursor, without repeats", async () => {
+    const all = (await app.inject({ url: `/v1/links?crawl_id=${crawlId}&limit=100` })).json().data.map((d: { id: number }) => d.id);
+    const seen: number[] = [];
+    let cursor: string | null = null;
+    do {
+      const res = await app.inject({ url: `/v1/links?crawl_id=${crawlId}&limit=2${cursor ? `&cursor=${cursor}` : ""}` });
+      const body: { data: { id: number }[]; next_cursor: string | null } = res.json();
+      seen.push(...body.data.map((d: { id: number }) => d.id));
+      cursor = body.next_cursor;
+    } while (cursor);
+    expect(seen).toEqual(all);
+  });
+
+  it("GET /v1/links/:id lists every sighting", async () => {
+    const first = (await app.inject({ url: `/v1/links?crawl_id=${crawlId}&limit=1` })).json().data[0];
+    const res = await app.inject({ url: `/v1/links/${first.id}?crawl_id=${crawlId}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().sources.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("full-text search finds links by their words", async () => {
+    const res = await app.inject({ url: `/v1/links?crawl_id=${crawlId}&q=adopted` });
+    expect(res.json().data.some((d: { url: string }) => d.url.endsWith("fy2026-adopted-budget.pdf"))).toBe(true);
+  });
+
+  it("GET /v1/contacts returns the contact with its source", async () => {
+    const res = await app.inject({ url: `/v1/contacts?crawl_id=${crawlId}` });
+    expect(res.json().data[0]).toMatchObject({ name: "Jane Doe", title: "Finance Director", email: "jdoe@example.gov" });
+    expect(res.json().data[0].source_snippet).toContain("Jane Doe");
+  });
+
+  it("GET /v1/crawls/:id/pages explains every skip", async () => {
+    const res = await app.inject({ url: `/v1/crawls/${crawlId}/pages?status=skipped` });
+    const reasons = res.json().data.map((p: { reason: string }) => p.reason);
+    expect(reasons).toContain("robots.txt");
+    expect(reasons.some((r: string) => r.startsWith("trap:"))).toBe(true);
+  });
+
+  it("asks for crawl_id or host, and answers 404 for unknown ids", async () => {
+    expect((await app.inject({ url: "/v1/links" })).statusCode).toBe(400);
+    expect((await app.inject({ url: "/v1/crawls/00000000-0000-0000-0000-000000000000" })).statusCode).toBe(404);
+    const nope = await app.inject({ url: "/nope" });
+    expect(nope.json().error.code).toBe("not_found");
+  });
+
+  it("serves the OpenAPI document and the pages", async () => {
+    const spec = (await app.inject({ url: "/docs/json" })).json();
+    expect(Object.keys(spec.paths)).toEqual(expect.arrayContaining(["/v1/crawls", "/v1/links", "/v1/contacts", "/v1/crawls/{id}/events"]));
+    expect((await app.inject({ url: `/live/${crawlId}` })).body).toContain("EventSource");
+    expect((await app.inject({ url: "/" })).statusCode).toBe(200);
+  });
+});
+
+describe("GET /v1/crawls/:id/events", () => {
+  it("streams the stored history as Server-Sent Events and closes when the crawl is over", async () => {
+    const address = await app.listen({ port: 0, host: "127.0.0.1" });
+    const res = await fetch(`${address}/v1/crawls/${crawlId}/events`);
+    expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+    const text = await res.text(); // the stream ends because the crawl is finished
+    expect(text).toContain("event: crawl.started");
+    expect(text).toContain("event: page.fetched");
+    expect(text).toContain("event: crawl.done");
+    expect(text).toMatch(/^id: \d+$/m);
+  });
+
+  it("resumes after Last-Event-ID", async () => {
+    const address = app.server.address() as { port: number };
+    const all = await (await fetch(`http://127.0.0.1:${address.port}/v1/crawls/${crawlId}/events`)).text();
+    const ids = [...all.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1]));
+    const mid = ids[Math.floor(ids.length / 2)]!;
+    const rest = await (await fetch(`http://127.0.0.1:${address.port}/v1/crawls/${crawlId}/events`, { headers: { "last-event-id": String(mid) } })).text();
+    const restIds = [...rest.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1]));
+    expect(restIds[0]).toBeGreaterThan(mid);
+    expect(restIds).toEqual(ids.filter((i) => i > mid));
+  });
+});

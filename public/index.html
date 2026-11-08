@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>High-Value Link Scraper</title>
+<style>
+  :root { --bg: #f5f6f8; --surface: #fff; --fg: #18202b; --muted: #5d6878; --line: #dde2e9; --accent: #1d5fa8; --ok: #217047; --bad: #b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e131a; --surface: #151c26; --fg: #e3e8ef; --muted: #98a3b3; --line: #273140; --accent: #7fb2ec; --ok: #6cc796; --bad: #f08a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 16px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 18px; }
+  form, table { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  form { display: grid; grid-template-columns: minmax(0, 1fr) 90px 110px auto; gap: 10px; padding: 14px; align-items: end; }
+  @media (max-width: 640px) { form { grid-template-columns: 1fr 1fr; } form .url { grid-column: 1 / -1; } }
+  label { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
+  input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
+  button { font: 600 14px system-ui; padding: 9px 16px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  .sites { margin: 10px 0 26px; font-size: 13px; color: var(--muted); }
+  .sites a { margin-right: 10px; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13.5px; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.u { word-break: break-all; }
+  .done { color: var(--ok); } .blocked, .failed { color: var(--bad); }
+  a { color: var(--accent); }
+  #err { color: var(--bad); margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>High-Value Link Scraper</h1>
+  <p>Finds budgets, annual financial reports and finance contacts on public-sector websites. <a href="/docs">API docs</a></p>
+  <form id="f">
+    <label class="url">Start page<input id="url" type="url" required placeholder="https://www.a2gov.org/"></label>
+    <label>Depth<input id="depth" type="number" min="0" max="5" value="3"></label>
+    <label>Page budget<input id="budget" type="number" min="1" max="5000" value="300"></label>
+    <button>Crawl</button>
+  </form>
+  <div id="err"></div>
+  <div class="sites">Test sites:
+    <a data-u="https://www.a2gov.org/">a2gov.org</a>
+    <a data-u="https://bozeman.net/">bozeman.net</a>
+    <a data-u="https://www.asu.edu/">asu.edu</a>
+    <a data-u="https://www.boerneisd.net/">boerneisd.net</a>
+  </div>
+  <table>
+    <thead><tr><th>Start page</th><th>Status</th><th>Pages</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="4">Loading…</td></tr></tbody>
+  </table>
+</div>
+<script>
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  document.querySelectorAll("[data-u]").forEach((a) => a.onclick = () => { document.getElementById("url").value = a.dataset.u; });
+  document.getElementById("f").onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { url: url.value, max_depth: Number(depth.value), page_budget: Number(budget.value) };
+    const r = await fetch("/v1/crawls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) { document.getElementById("err").textContent = j.error ? j.error.message : "error"; return; }
+    location.href = j.links.live;
+  };
+  async function load() {
+    const j = await fetch("/v1/crawls?limit=25").then((r) => r.json());
+    document.getElementById("rows").innerHTML = j.data.length ? j.data.map((c) => `<tr>
+      <td class="u">${esc(c.seed_url)}<br><span style="color:var(--muted);font-size:12px">${new Date(c.created_at).toLocaleString()}</span></td>
+      <td class="${c.status}">${c.status}${c.status_detail ? `<br><span style="font-size:12px">${esc(c.status_detail)}</span>` : ""}</td>
+      <td>${c.pages_fetched}</td>
+      <td><a href="/live/${c.id}">live</a> · <a href="/v1/links?crawl_id=${c.id}&min_score=0.5">links</a> · <a href="/v1/contacts?crawl_id=${c.id}">contacts</a></td>
+    </tr>`).join("") : `<tr><td colspan="4">No crawls yet.</td></tr>`;
+  }
+  load();
+  setInterval(load, 5000);
+</script>
+</body>
+</html>
