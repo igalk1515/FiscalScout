@@ -24,6 +24,8 @@ export interface LinkScore {
   noise: boolean;
   /** Set to "llm" when the LLM tier replaced the rules score. */
   decidedBy?: "rules" | "llm";
+  /** The link points inside the crawl's scope. */
+  internal?: boolean;
 }
 
 export interface ScoreContext {
@@ -230,5 +232,6 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
     matchedKeywords: [...matched],
     reason: target > 0 ? notes.join("; ") : pNotes.length ? `path: ${pNotes.join(", ")}` : "no signal",
     noise,
+    internal: ctx.internal,
   };
 }

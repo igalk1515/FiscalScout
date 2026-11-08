@@ -44,6 +44,11 @@ export async function applyLlmTier(
           target *= 0.85;
           notes.push("draft (x0.85)");
         }
+        if (x.s.type === "page" && x.s.internal) {
+          // A page on the entity's own site about budgets is nearly always the list of budgets.
+          target *= 0.6;
+          notes.push("a page on the entity's site, likely the list rather than the document (x0.60)");
+        }
       }
       x.s = {
         ...x.s,

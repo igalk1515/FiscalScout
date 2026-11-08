@@ -37,6 +37,19 @@ describe("LLM tier", () => {
     expect(xs[2]!.s.decidedBy).toBeUndefined();
   });
 
+  it("keeps a list page on the entity's site below the documents, even when the LLM is sure", async () => {
+    const page = link("https://city.gov/finance/budgets", "Adopted Budgets");
+    const xs = [{ link: page, s: scoreLink(page, { groups, parentPathScore: 0.9, internal: true, now: NOW }) }];
+    xs[0]!.s.targetScore = 0.5; // make sure it is in the unsure band
+    const fake: LlmClient = {
+      enabled: true, model: "fake", extractContacts: async () => [],
+      classifyLinks: async (items) => items.map((it) => ({ i: it.i, doc_type: "budget", target_score: 0.9, path_score: 0.9, reason: "budgets" })),
+    };
+    await applyLlmTier(fake, groups, xs, undefined, NOW);
+    expect(xs[0]!.s.targetScore).toBeCloseTo(0.54);
+    expect(xs[0]!.s.pathScore).toBeGreaterThanOrEqual(0.9); // still a page worth crawling
+  });
+
   it("keeps the rules scores when the call fails", async () => {
     const xs = [link("https://x.edu/a-2026-annual-comp-fin-rpt.pdf", "Annual comprehensive financial report 2026")].map((l) => ({
       link: l,
