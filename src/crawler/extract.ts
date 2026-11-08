@@ -129,7 +129,11 @@ export function extractPage(html: string | CheerioAPI, pageUrl: string): PageExt
   const canonicalHref = $('link[rel="canonical" i]').attr("href");
 
   const links = new Map<string, LinkCandidate>();
-  let heading = "";
+  // A real heading (h1-h6) names the section. A bold line alone in a paragraph ("Recent Operating
+  // Budget Submissions:") often names the list below it, but it can also be a sidebar label
+  // ("Contact Us"), so it is added to the real heading instead of replacing it.
+  let realHeading = "";
+  let pseudoHeading = "";
   const HEADINGS = "h1, h2, h3, h4, h5, h6, [role=heading], summary, p > strong:only-child, p > b:only-child";
   $(`${HEADINGS}, a[href]`).each((_, node) => {
     const el = node as Element;
@@ -137,11 +141,17 @@ export function extractPage(html: string | CheerioAPI, pageUrl: string): PageExt
       // Headings for screen readers only ("Breadcrumb") say nothing about the content below.
       if ($(el).closest(".visually-hidden, .sr-only, .element-invisible, .screen-reader-text").length) return;
       const t = cleanText($(el).text());
-      // A bold line alone in a paragraph ("Recent Operating Budget Submissions:") acts as a heading.
-      if ((el.name === "strong" || el.name === "b") && cleanText($(el).parent().text()) !== t) return;
-      if (t && t.length <= 200) heading = t.replace(/:$/, "");
+      const pseudo = el.name === "strong" || el.name === "b";
+      if (pseudo && cleanText($(el).parent().text()) !== t) return;
+      if (!t || t.length > 200) return;
+      if (pseudo) pseudoHeading = t.replace(/:$/, "");
+      else {
+        realHeading = t;
+        pseudoHeading = "";
+      }
       return;
     }
+    const heading = pseudoHeading ? (realHeading ? `${realHeading} › ${pseudoHeading}` : pseudoHeading) : realHeading;
     const url = normalizeUrl($(el).attr("href") ?? "", base);
     if (!url || url === pageNorm) return;
     const anchor = anchorText($, el);

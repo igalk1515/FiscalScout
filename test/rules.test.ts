@@ -121,6 +121,15 @@ describe("rules scoring on the test sites", () => {
     if (social) expect(social.s.targetScore).toBe(0);
   });
 
+  it("a paper about the budget ranks below the budget itself", () => {
+    const base = { titleAttr: "", heading: "Budget", context: "", boilerplate: false, nofollow: false, source: "html" as const };
+    const ctx = { groups, parentPathScore: 0.9, internal: false, now: NOW };
+    const book = scoreLink({ ...base, url: "https://cdn.example/fy26-budget-book.pdf", anchor: "Adopted Budget FY2026" }, ctx);
+    const answers = scoreLink({ ...base, url: "https://cdn.example/260501-fy27-budget-responses.pdf", anchor: "FY27 Budget Responses" }, ctx);
+    expect(answers.targetScore).toBeLessThan(book.targetScore - 0.15);
+    expect(answers.reason).toMatch(/paper about the document/);
+  });
+
   it("keywords are per crawl: with other keywords the ACFR is no longer a result", () => {
     const police = compileKeywords({ "body cameras": { weight: 1, kind: "document", synonyms: ["body-worn camera"] } });
     const acfr = scored("a2gov_reports", 0.9, police).find((x) => x.link.url.endsWith("6-30-25-acfr-final.pdf"))!;

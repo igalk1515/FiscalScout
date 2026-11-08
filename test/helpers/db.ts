@@ -8,7 +8,7 @@ export async function testDb(): Promise<Db> {
   const db = createDb(TEST_DATABASE_URL, 10);
   await migrate(db);
   await db.query(
-    "truncate crawl_events, contacts, sightings, link_scores, links, pages, frontier, hosts, crawls, llm_cache restart identity cascade",
+    "truncate crawl_events, contacts, sightings, link_scores, links, pages, frontier, hosts, sites, crawls, llm_cache restart identity cascade",
   );
   return db;
 }

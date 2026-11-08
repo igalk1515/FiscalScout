@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractPage, parseHtml } from "../src/crawler/extract.js";
-import { cleanName, findContacts, verifyAgainstBlock } from "../src/ranking/contacts.js";
+import { cleanName, findContacts, parseContactLines, verifyAgainstBlock } from "../src/ranking/contacts.js";
 import { compileKeywords, DEFAULT_KEYWORDS } from "../src/ranking/keywords.js";
 import type { LlmClient } from "../src/ranking/llm.js";
 import { fixture, type FixtureName } from "./helpers/fixtures.js";
@@ -44,6 +44,10 @@ describe("names and verification", () => {
     expect(cleanName("Wesley Scott, CPA, RTSBA")).toBe("Wesley Scott");
     expect(cleanName("Finance Department")).toBeNull();
     expect(cleanName("Contact Us")).toBeNull();
+  });
+
+  it("reads the person after a label, not the name on the line above", () => {
+    expect(parseContactLines("Craig Hupy\nPrepared by: Tom Crawford, CFO", groups)).toEqual([{ name: "Tom Crawford", title: "CFO" }]);
   });
 
   it("drops any value the LLM returns that is not in the block", () => {

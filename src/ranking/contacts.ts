@@ -72,17 +72,20 @@ export function parseContactLines(block: string, groups: CompiledGroup[]): Parse
   lines.forEach((line, i) => {
     const m = titleMatch(groups, line);
     if (!m) return;
-    // (a) "Name, Title" or "Name - Title" on one line
-    const split = line.match(/^(.{3,60}?)\s*(?:,|\s-\s|\s–\s|\|)\s*(.+)$/);
+    // (a) "Name, Title" or "Name - Title" on one line, after a label such as "Prepared by:"
+    const split = line.match(/^(.{3,80}?)\s*(?:,|\s-\s|\s–\s|\|)\s*(.+)$/);
     if (split) {
-      const name = cleanName(split[1]!);
+      const left = split[1]!.includes(":") ? split[1]!.split(":").pop()! : split[1]!;
+      const name = cleanName(left);
       if (name && titleMatch(groups, split[2]!)) {
         out.push({ name, title: cleanText(split[2]!) });
         return;
       }
     }
+    // A line that names someone after a label ("Prepared by: ...") belongs to that person only.
+    const labelled = /^[A-Za-z ]{2,30}:/.test(line);
     // (b) name on the line before: "Marti Praschan," / "Chief Financial Officer"
-    if (i > 0) {
+    if (i > 0 && !labelled) {
       const name = cleanName(lines[i - 1]!);
       if (name) {
         out.push({ name, title: line });
@@ -90,7 +93,7 @@ export function parseContactLines(block: string, groups: CompiledGroup[]): Parse
       }
     }
     // (c) title alone, name on the next line
-    if (i + 1 < lines.length && line.length < 80) {
+    if (i + 1 < lines.length && line.length < 80 && !labelled) {
       const name = cleanName(lines[i + 1]!);
       if (name) {
         out.push({ name, title: line });

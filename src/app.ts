@@ -34,6 +34,7 @@ export async function createContext(overrides: ContextOverrides = {}): Promise<A
   const db = overrides.db ?? createDb(config.DATABASE_URL);
   await migrate(db);
   const events = new EventBus(db);
+  await events.listen();
   const llm =
     overrides.llm ??
     createLlm({
@@ -63,6 +64,7 @@ export async function createContext(overrides: ContextOverrides = {}): Promise<A
     log,
     async close() {
       await runner.stop();
+      await events.close();
       if (!overrides.db) await db.end();
     },
   };

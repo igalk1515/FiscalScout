@@ -1,0 +1,76 @@
+{
+  "note": "Targets found by hand on the four test sites, November 7-8, 2026. A document counts as found when it is in the top 10 of its type for the crawl; a contact when the name (and the email, if given) is among the crawl's contacts.",
+  "sites": [
+    {
+      "name": "Ann Arbor",
+      "seed": "https://www.a2gov.org/",
+      "domain": "a2gov.org",
+      "expect": [
+        {
+          "kind": "document",
+          "doc_type": "acfr",
+          "what": "ACFR FY2025",
+          "any_of": ["https://media-001-us.cdn.govstack.com/a2gov-002-us/media/v2abzw2u/city-of-ann-arbor-6-30-25-acfr-final.pdf"]
+        },
+        {
+          "kind": "document",
+          "doc_type": "budget",
+          "what": "Adopted budget FY2027 (ClearGov) or FY2026 (PDF)",
+          "any_of": [
+            "https://city-ann-arbor-mi-cleardoc.cleargov.com/23859",
+            "https://www.a2gov.org/media/je4nrvnr/fy26-budget-book.pdf"
+          ]
+        },
+        { "kind": "contact", "what": "Chief Financial Officer", "name": "Marti Praschan", "email": "mpraschan@a2gov.org" }
+      ]
+    },
+    {
+      "name": "Boerne ISD",
+      "seed": "https://www.boerneisd.net/",
+      "domain": "boerneisd.net",
+      "expect": [
+        {
+          "kind": "document",
+          "doc_type": "acfr",
+          "what": "Annual Financial Report FY2025",
+          "any_of": ["https://files.smartsites.parentsquare.com/13370/2025acfrfinal.pdf"]
+        },
+        {
+          "kind": "document",
+          "doc_type": "budget",
+          "what": "Adopted budget 2026-27",
+          "any_of": ["https://files.smartsites.parentsquare.com/13370/2026-2027_bisd_adopted_budget.pdf"]
+        },
+        { "kind": "contact", "what": "Chief Financial Officer", "name": "Wesley Scott", "email": "wesley.scott@boerneisd.net" }
+      ]
+    },
+    {
+      "name": "Arizona State University",
+      "seed": "https://www.asu.edu/",
+      "domain": "asu.edu",
+      "expect": [
+        {
+          "kind": "document",
+          "doc_type": "acfr",
+          "what": "ACFR 2026",
+          "any_of": ["https://www.asu.edu/fs/documents/annual_reports/ASU-2026-Annual-comp-fin-rpt.pdf"]
+        },
+        {
+          "kind": "document",
+          "doc_type": "budget",
+          "what": "Operating budget FY2027 (Board of Regents SharePoint)",
+          "any_of": ["https://azregents.sharepoint.com/:b:/s/ABORPublic/Committee/Board/IQDqzHYxINVCRIodPTa5Q03nAY1bAil0wGE2sT3teJ6TJn0"]
+        },
+        { "kind": "contact", "what": "Executive Vice President, Treasurer and CFO", "name": "Morgan R. Olsen" }
+      ]
+    },
+    {
+      "name": "Bozeman",
+      "seed": "https://bozeman.net/",
+      "domain": "bozeman.net",
+      "expect_blocked": true,
+      "expect": []
+    }
+  ],
+  "relevant_pattern": "acfr|cafr|annual[- _]?(comprehensive[- _]?)?financial|comp-fin|budget|single[- _]?audit|saac|financial[- _]?(report|statement)|audit"
+}

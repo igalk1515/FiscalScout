@@ -158,11 +158,17 @@ export class CrawlRunner {
     while (!this.stopping) {
       if (state.claimed >= state.crawl.page_budget) return;
       const explore = Math.random() < (this.o.exploreRate ?? 0.1);
-      const item = await repo.claimNext(db, id, explore);
+      // No host may take more than 30% of the budget, so one big subdomain cannot crowd out the rest.
+      const maxPerHost = Math.max(30, Math.ceil(state.crawl.page_budget * 0.3));
+      const item = await repo.claimNext(db, id, explore, maxPerHost);
       if (!item) {
         const pending = await repo.pendingCounts(db, id);
         if (pending.queued === 0 && pending.fetching === 0) return;
         await sleep(150);
+        continue;
+      }
+      if (item.capped) {
+        await this.o.events.emit(id, "page.skipped", { url: item.url, reason: "host share of the page budget used" });
         continue;
       }
       state.claimed++;
@@ -171,7 +177,7 @@ export class CrawlRunner {
       } catch (err) {
         this.o.log.error({ err, url: item.url }, "page failed");
         await repo.finishItem(db, id, item.url_hash, "failed", null, `internal error: ${(err as Error).message}`.slice(0, 300));
-        await repo.releaseHost(db, item.host, this.o.minDelayMs, false);
+        await repo.releaseHost(db, item.host, this.o.minDelayMs, "ok");
       }
     }
   }
@@ -206,7 +212,7 @@ export class CrawlRunner {
     const policy = await this.robotsFor(item.url);
     if (!isAllowed(policy, item.url, this.o.robotsToken)) {
       await repo.finishItem(db, id, item.url_hash, "skipped", null, "robots.txt");
-      await repo.releaseHost(db, item.host, this.o.minDelayMs, false);
+      await repo.releaseHost(db, item.host, this.o.minDelayMs, "ok");
       if (item.depth === 0) state.seedOutcome = { status: 0, reason: "robots.txt" };
       await events.emit(id, "page.skipped", { url: item.url, reason: "robots.txt" });
       return;
@@ -231,9 +237,11 @@ export class CrawlRunner {
       },
     });
 
-    // Release the host: one request at a time, at least `delay` apart, longer for slow hosts.
-    const isError = r.status === 0 || r.status >= 500 || r.status === 403 || r.status === 429;
-    const blocked = await repo.releaseHost(db, item.host, Math.max(delay, Math.min(10_000, r.ms)), isError);
+    // Release the site: one request at a time, at least `delay` apart, longer for slow sites, and
+    // backing off further while the site answers 429 or 503 ("slow down").
+    const slowDown = r.status === 429 || r.status === 503;
+    const outcome: repo.FetchOutcome = slowDown ? "slow_down" : r.status === 0 || r.status >= 500 || r.status === 403 ? "error" : "ok";
+    const blocked = await repo.releaseHost(db, item.host, Math.max(delay, Math.min(10_000, r.ms)), outcome, r.retryAfterMs ?? 0);
     if (blocked) {
       const n = await repo.skipQueued(db, id, "host paused after repeated errors", item.host);
       await events.emit(id, "host.paused", { host: item.host, skipped: n });
@@ -248,7 +256,8 @@ export class CrawlRunner {
     const failed = r.status === 0 || r.status >= 400;
     if (failed) {
       const reason = r.error ?? `HTTP ${r.status}`;
-      if (isRetryable(r) && item.attempts < (this.o.maxAttempts ?? 3)) {
+      const attemptsAllowed = slowDown ? 5 : this.o.maxAttempts ?? 3;
+      if (isRetryable(r) && item.attempts < attemptsAllowed) {
         const backoff = r.retryAfterMs ?? 2 ** item.attempts * 1000 + Math.floor(Math.random() * 500);
         await repo.requeueItem(db, id, item.url_hash, Math.min(backoff, 60_000), `retry after ${reason}`);
         state.claimed--; // a retry does not use the page budget

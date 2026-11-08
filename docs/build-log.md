@@ -102,3 +102,45 @@ Bug found by the tests: the robots.txt cache keyed hosts without the port, so tw
 127.0.0.1 shared rules. Hosts now include a non-default port, as RFC 9309 expects.
 
 `npm test`: 75 tests pass.
+
+## Step 8 milestone · one page end to end through the API
+
+`POST /v1/crawls` with `max_depth: 0` on Ann Arbor's Financial Reporting page, then
+`GET /v1/links?min_score=0.7`: FY2026 budget PDF 1.00, FY2027 budget (ClearGov) 0.95, FY2025
+budget 0.92, FY2024 0.84, ACFR FY2025 0.78, each with the heading it was found under.
+`/docs` renders the OpenAPI page. `test/api.test.ts` covers validation, idempotency, filters,
+keyset pagination, full-text search, contacts, the pages list and the SSE stream.
+
+## Step 10 · Live view
+
+- `GET /v1/crawls/:id/events` streams history, then live events; `Last-Event-ID` resumes.
+- Found while testing: events only reached streams in the same process, so a crawl started
+  from the CLI did not update the API's watch page live. Events now also go out on a Postgres
+  NOTIFY channel. Checked with `curl -N` against the API while the CLI crawled Ann Arbor:
+  `page.fetching`, `page.fetched`, `page.skipped`, `contact.found` and `stats` arrived live.
+
+## Step 9 on the real sites · first run, and what it taught
+
+`npm run crawl:test-sites` (depth 3, 300 pages each), rules only:
+
+- Bozeman: blocked after one refused request, reported, not bypassed.
+- Ann Arbor: ACFR FY2025, the budgets and Marti Praschan found. Problem: "FY27 Budget
+  Responses" memos scored as high as the budget itself.
+- Boerne: reports, budgets and Wesley Scott found. Problems: the 2026-27 budget took the
+  sidebar label "Contact Us" as its heading and ranked below 2025-26; Wesley Scott was stored
+  three times (two hosts, and once as "Wes").
+- ASU: budget and Morgan R. Olsen found, ACFR missed. Two causes: the budget was spent on
+  asuonline.asu.edu, whose "Finance" and "Accounting" degree pages look like finance pages; and
+  cfo.asu.edu answered HTTP 429. The crawler kept one request at a time per host, but three
+  workers were hitting three asu.edu subdomains at once, which share one rate limit.
+
+Fixes:
+- Politeness per site (registrable domain) instead of per host, with a backoff that doubles on
+  429 or 503 (up to a minute) and halves on success. 429 no longer pauses a host.
+- No host may use more than 30% of the page budget.
+- Degree, course and student pages lose 0.30 path score; phrases such as "Financial Reports"
+  or "Business and Finance" gain 0.40.
+- Papers about a document ("responses", "hearing notice", "agenda") lose 0.20.
+- A bold line used as a heading is added to the real heading instead of replacing it.
+- One contact per person per crawl: same name, or same email under a shorter name.
+- A line like "Prepared by: Tom Crawford, CFO" is read as Tom Crawford, not the name above it.

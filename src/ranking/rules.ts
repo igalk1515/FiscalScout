@@ -42,11 +42,21 @@ export const SOCIAL_HOSTS =
 const NOISE_WORDS =
   /(?<![a-z])(log ?in|sign ?in|sign ?up|register|subscribe|translate|privacy|cookies?|accessibility statement|skip to|print|share|calendar|events?|news|press releases?|weather|parking tickets?)(?![a-z])/i;
 
+/** Phrases that almost always name the page that lists finance documents. */
+const VERY_STRONG_HUB =
+  /(?<![a-z])(financial reports?|financial statements?|financial transparency|budget documents?|budget office|office of (management and )?budget|finance department|department of finance|business (and|&) finance|business (and|&) financial services|annual reports?|audit reports?)(?![a-z])/i;
+/** Course and degree pages: "Finance (BS)" is a program, not the finance office. */
+const ACADEMIC =
+  /(?<![a-z])(degrees?|bachelor'?s?|master'?s?|mba|ph ?d|majors?|minors?|programs?|courses?|classes|certificates?|admissions?|apply|tuition|curriculum|online learning|students?|faculty|research)(?![a-z])/i;
 /** Words that mark a page as a likely hub on the way to finance documents. */
 const STRONG_HUB =
   /(?<![a-z])(finance|financial|financials|budgets?|treasurer|treasury|accounting|fiscal|transparency|comptroller|controller|business (and|&) finance|business services|business (and|&) financial services|administrative services|audits?)(?![a-z])/i;
 const WEAK_HUB =
   /(?<![a-z])(departments?|government|administration|city hall|about|leadership|documents?|document center|reports|publications|open data|directory|staff|offices?|board|council|agendas?|minutes)(?![a-z])/i;
+
+/** Papers about a document rather than the document: "FY27 Budget Responses", "Budget Hearing Notice". */
+const SUPPORTING_PAPER =
+  /(?<![a-z])(responses?|questions?|q ?& ?a|faq|memos?|memorandum|presentations?|slides|hearings?|notices?|agendas?|minutes|survey|resolutions?|amendments?|transmittal|timeline|calendar|work ?sessions?|press release|public comment|workshop)(?![a-z])/i;
 
 const round = (n: number) => Math.round(Math.max(0, Math.min(1, n)) * 1000) / 1000;
 
@@ -156,6 +166,11 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
       target -= 0.15;
       notes.push("marked as a draft (-0.15)");
     }
+    const paperWords = `${anchor} ${link.titleAttr} ${urlWords(fileName)}`;
+    if (best.kind === "document" && SUPPORTING_PAPER.test(paperWords)) {
+      target -= 0.2;
+      notes.push(`a paper about the document ('${paperWords.match(SUPPORTING_PAPER)![0]}'), not the document itself (-0.20)`);
+    }
     if (link.boilerplate) {
       target -= 0.2;
       notes.push("in a menu, header or footer (-0.20)");
@@ -180,12 +195,19 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
     path = bestPath.value;
     pNotes.push(...bestPath.notes);
     const hubText = `${anchor} ${urlWords(u.pathname)}`;
-    if (STRONG_HUB.test(hubText)) {
+    if (VERY_STRONG_HUB.test(hubText)) {
+      path += 0.4;
+      pNotes.push("names a finance documents page");
+    } else if (STRONG_HUB.test(hubText)) {
       path += 0.25;
       pNotes.push("finance hub words");
     } else if (WEAK_HUB.test(hubText)) {
       path += 0.12;
       pNotes.push("navigation words");
+    }
+    if (ACADEMIC.test(`${hubText} ${u.hostname.split(".")[0]}`)) {
+      path -= 0.3;
+      pNotes.push("a degree, course or student page (-0.30)");
     }
     if (ctx.parentPathScore > 0) path += 0.15 * ctx.parentPathScore;
     if (link.boilerplate) path -= 0.05;

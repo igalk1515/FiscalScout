@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { type Db, tx } from "../db/client.js";
+import { registrableDomain } from "../crawler/url.js";
+import { type Db, type DbClient, tx } from "../db/client.js";
 import type { KeywordConfig } from "../ranking/keywords.js";
+
+/** Host rows (robots.txt, errors) and their site rows (politeness: one request at a time per site). */
+async function ensureHosts(q: Db | DbClient, hosts: string[]) {
+  if (!hosts.length) return;
+  const sites = hosts.map((h) => registrableDomain(h));
+  await q.query("insert into sites (site) select unnest($1::text[]) on conflict do nothing", [[...new Set(sites)]]);
+  await q.query(
+    `insert into hosts (host, site) select * from unnest($1::text[], $2::text[])
+     on conflict (host) do update set site = excluded.site where hosts.site is distinct from excluded.site`,
+    [hosts, sites],
+  );
+}
 
 export type CrawlStatus = "queued" | "running" | "done" | "blocked" | "failed";
 
@@ -58,7 +71,7 @@ export async function createCrawl(
       const again = await client.query<CrawlRow>("select * from crawls where idempotency_key = $1", [c.idempotencyKey]);
       return { crawl: again.rows[0]!, created: false };
     }
-    await client.query("insert into hosts (host) values ($1) on conflict do nothing", [seed.host]);
+    await ensureHosts(client, [seed.host]);
     await client.query(
       `insert into frontier (crawl_id, url_hash, url, host, depth, path_score) values ($1, $2, $3, $4, 0, 1)`,
       [id, seed.hash, c.seedUrl, seed.host],
@@ -121,51 +134,82 @@ export interface FrontierItem {
   path_score: number;
   parent_url: string | null;
   attempts: number;
+  /** Set when the claim was turned into a skip because the host used its share of the budget. */
+  capped?: boolean;
 }
 
 /**
- * Claims the most promising queued URL whose host is free, and leases that host so no other
- * worker fetches from it until it is released. SKIP LOCKED lets any number of workers share
- * the queue without waiting on each other or taking the same row.
+ * Claims the most promising queued URL whose site is free, and leases the site so no other
+ * worker sends it a request until the lease is released. A site is a registrable domain:
+ * cfo.asu.edu and asuonline.asu.edu count as one, because they share servers and rate limits.
+ * SKIP LOCKED lets any number of workers share the queue without waiting on each other or
+ * taking the same row.
  */
-export async function claimNext(db: Db, crawlId: string, explore: boolean): Promise<FrontierItem | null> {
+export async function claimNext(db: Db, crawlId: string, explore: boolean, maxPerHost?: number): Promise<FrontierItem | null> {
   return tx(db, async (client) => {
-    const r = await client.query<FrontierItem>(
+    const r = await client.query<FrontierItem & { site: string }>(
       `with next as (
-         select f.crawl_id, f.url_hash
+         select f.crawl_id, f.url_hash, s.site
          from frontier f
          join hosts h on h.host = f.host
+         join sites s on s.site = h.site
          where f.crawl_id = $1 and f.status = 'queued'
-           and f.not_before <= now() and h.next_allowed_at <= now() and not h.blocked
+           and f.not_before <= now() and s.next_allowed_at <= now() and not h.blocked
          order by case when $2 then random() else 0 end, f.path_score desc, f.depth asc
          limit 1
-         for update of f, h skip locked
+         for update of f, s skip locked
        )
        update frontier f set status = 'fetching', attempts = f.attempts + 1, updated_at = now()
        from next where f.crawl_id = next.crawl_id and f.url_hash = next.url_hash
-       returning f.url, f.url_hash, f.host, f.depth, f.path_score, f.parent_url, f.attempts`,
+       returning f.url, f.url_hash, f.host, f.depth, f.path_score, f.parent_url, f.attempts, next.site`,
       [crawlId, explore],
     );
     const item = r.rows[0];
     if (!item) return null;
-    // Lease the host: nobody else may fetch from it until releaseHost sets the next time.
-    await client.query("update hosts set next_allowed_at = now() + interval '10 minutes' where host = $1", [item.host]);
+    // Lease the site: nobody else may send it a request until releaseHost sets the next time.
+    await client.query("update sites set next_allowed_at = now() + interval '10 minutes' where site = $1", [item.site]);
+    if (maxPerHost) {
+      // One host may not use up the whole page budget (a university's online-degree site).
+      const used = await client.query<{ n: number }>(
+        "select count(*)::int as n from frontier where crawl_id = $1 and host = $2 and status in ('done', 'failed', 'fetching')",
+        [crawlId, item.host],
+      );
+      if (used.rows[0]!.n > maxPerHost) {
+        await client.query(
+          `update frontier set status = 'skipped', reason = 'host share of the page budget used', updated_at = now()
+           where crawl_id = $1 and host = $2 and (status = 'queued' or url_hash = $3)`,
+          [crawlId, item.host, item.url_hash],
+        );
+        await client.query("update sites set next_allowed_at = now() where site = $1", [item.site]);
+        return { ...item, capped: true } as FrontierItem;
+      }
+    }
     return item;
   });
 }
 
+export type FetchOutcome = "ok" | "error" | "slow_down";
+
 /**
- * Ends the host lease: the next request may go out after delayMs. Five errors in a row pause
- * the host. Returns true when the host is now blocked.
+ * Ends the site lease: the next request may go out after delayMs, or later while the site is
+ * asking us to slow down (429 or 503 double a backoff, up to a minute; success halves it).
+ * Five other errors in a row pause the host. Returns true when the host is now blocked.
  */
-export async function releaseHost(db: Db, host: string, delayMs: number, error: boolean): Promise<boolean> {
+export async function releaseHost(db: Db, host: string, delayMs: number, outcome: FetchOutcome, retryAfterMs = 0): Promise<boolean> {
+  await db.query(
+    `update sites s set
+       backoff_ms = case when $3 = 'slow_down' then least(60000, greatest(2000, s.backoff_ms * 2)) else s.backoff_ms / 2 end,
+       next_allowed_at = now() + make_interval(secs => greatest($2::float8,
+         case when $3 = 'slow_down' then least(60000, greatest(2000, s.backoff_ms * 2)) else s.backoff_ms / 2 end, $4::float8) / 1000)
+     from hosts h where h.host = $1 and s.site = h.site`,
+    [host, delayMs, outcome, retryAfterMs],
+  );
   const r = await db.query<{ blocked: boolean }>(
     `update hosts set
-       next_allowed_at = now() + make_interval(secs => $2::float8 / 1000),
-       consecutive_errors = case when $3 then consecutive_errors + 1 else 0 end,
-       blocked = blocked or ($3 and consecutive_errors + 1 >= 5)
+       consecutive_errors = case when $2 = 'error' then consecutive_errors + 1 when $2 = 'ok' then 0 else consecutive_errors end,
+       blocked = blocked or ($2 = 'error' and consecutive_errors + 1 >= 5)
      where host = $1 returning blocked`,
-    [host, delayMs, error],
+    [host, outcome],
   );
   return r.rows[0]?.blocked ?? false;
 }
@@ -200,9 +244,9 @@ export async function pendingCounts(db: Db, crawlId: string): Promise<{ queued: 
 export async function resetStale(db: Db, crawlId: string) {
   await db.query("update frontier set status = 'queued' where crawl_id = $1 and status = 'fetching'", [crawlId]);
   await db.query(
-    `update hosts set next_allowed_at = now()
-     where next_allowed_at > now() + interval '1 minute'
-       and host in (select distinct host from frontier where crawl_id = $1)`,
+    `update sites set next_allowed_at = now()
+     where next_allowed_at > now() + interval '2 minutes'
+       and site in (select distinct h.site from frontier f join hosts h on h.host = f.host where f.crawl_id = $1)`,
     [crawlId],
   );
 }
@@ -234,8 +278,7 @@ export interface EnqueueRow {
  */
 export async function enqueue(db: Db, crawlId: string, rows: EnqueueRow[]): Promise<{ url: string; status: string; reason: string | null }[]> {
   if (!rows.length) return [];
-  const hosts = [...new Set(rows.filter((r) => r.status === "queued").map((r) => r.host))];
-  if (hosts.length) await db.query("insert into hosts (host) select unnest($1::text[]) on conflict do nothing", [hosts]);
+  await ensureHosts(db, [...new Set(rows.filter((r) => r.status === "queued").map((r) => r.host))]);
   const payload = rows.map((r) => ({
     h: r.hash.toString("hex"),
     url: r.url,
@@ -271,9 +314,9 @@ export async function getRobots(db: Db, host: string): Promise<{ status: number;
 }
 
 export async function saveRobots(db: Db, host: string, status: number, text: string | null, crawlDelayMs: number | undefined) {
+  await ensureHosts(db, [host]);
   await db.query(
-    `insert into hosts (host, robots_status, robots_txt, robots_fetched_at, crawl_delay_ms) values ($1, $2, $3, now(), $4)
-     on conflict (host) do update set robots_status = $2, robots_txt = $3, robots_fetched_at = now(), crawl_delay_ms = $4`,
+    "update hosts set robots_status = $2, robots_txt = $3, robots_fetched_at = now(), crawl_delay_ms = $4 where host = $1",
     [host, status, text, crawlDelayMs ?? null],
   );
 }
@@ -461,14 +504,35 @@ export interface ContactRecord {
   decidedBy: "rules" | "llm";
 }
 
-/** Stores contacts for a crawl, one row per (host, name). Returns the names that are new. */
+/**
+ * Stores contacts for a crawl, one row per person: the same name, or the same email under a
+ * shorter name ("Wes Scott" and "Wesley Scott"), is one contact. Returns the names that are new.
+ */
 export async function saveContacts(db: Db, crawlId: string, contacts: ContactRecord[]): Promise<string[]> {
   const fresh: string[] = [];
   for (const c of contacts) {
+    if (c.email) {
+      const same = await db.query<{ id: number; name: string }>(
+        "select id, name from contacts where crawl_id = $1 and email = $2 and name <> $3 limit 1",
+        [crawlId, c.email, c.name],
+      );
+      const prev = same.rows[0];
+      if (prev) {
+        await db.query(
+          `update contacts set
+             name = case when length($2) > length(name) then $2 else name end,
+             title = case when length(coalesce($3, '')) > length(coalesce(title, '')) then $3 else title end,
+             phone = coalesce(phone, $4), score = greatest(score, $5)
+           where id = $1`,
+          [prev.id, c.name, c.title, c.phone, c.score],
+        );
+        continue;
+      }
+    }
     const r = await db.query<{ inserted: boolean }>(
       `insert into contacts (crawl_id, host, name, title, email, phone, score, matched_keywords, source_page_id, source_url, source_snippet, decided_by)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       on conflict (crawl_id, host, name) do update set
+       on conflict (crawl_id, name) do update set
          title = case when length(coalesce(excluded.title, '')) > length(coalesce(contacts.title, '')) then excluded.title else contacts.title end,
          email = coalesce(contacts.email, excluded.email),
          phone = coalesce(contacts.phone, excluded.phone),
