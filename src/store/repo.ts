@@ -154,7 +154,8 @@ export async function claimNext(db: Db, crawlId: string, explore: boolean, maxPe
          join hosts h on h.host = f.host
          join sites s on s.site = h.site
          where f.crawl_id = $1 and f.status = 'queued'
-           and f.not_before <= now() and s.next_allowed_at <= now() and not h.blocked
+           and f.not_before <= now() and s.next_allowed_at <= now()
+           and (h.paused_until is null or h.paused_until <= now())
          order by case when $2 then random() else 0 end, f.path_score desc, f.depth asc
          limit 1
          for update of f, s skip locked
@@ -193,7 +194,7 @@ export type FetchOutcome = "ok" | "error" | "slow_down";
 /**
  * Ends the site lease: the next request may go out after delayMs, or later while the site is
  * asking us to slow down (429 or 503 double a backoff, up to a minute; success halves it).
- * Five other errors in a row pause the host. Returns true when the host is now blocked.
+ * Five other errors in a row pause the host for 15 minutes. Returns true when it was just paused.
  */
 export async function releaseHost(db: Db, host: string, delayMs: number, outcome: FetchOutcome, retryAfterMs = 0): Promise<boolean> {
   await db.query(
@@ -204,14 +205,37 @@ export async function releaseHost(db: Db, host: string, delayMs: number, outcome
      from hosts h where h.host = $1 and s.site = h.site`,
     [host, delayMs, outcome, retryAfterMs],
   );
-  const r = await db.query<{ blocked: boolean }>(
+  const r = await db.query<{ paused: boolean }>(
     `update hosts set
-       consecutive_errors = case when $2 = 'error' then consecutive_errors + 1 when $2 = 'ok' then 0 else consecutive_errors end,
-       blocked = blocked or ($2 = 'error' and consecutive_errors + 1 >= 5)
-     where host = $1 returning blocked`,
+       paused_until = case when $2 = 'error' and consecutive_errors + 1 >= 5 then now() + interval '15 minutes' else paused_until end,
+       consecutive_errors = case
+         when $2 = 'error' and consecutive_errors + 1 >= 5 then 0
+         when $2 = 'error' then consecutive_errors + 1
+         when $2 = 'ok' then 0
+         else consecutive_errors end
+     where host = $1
+     returning paused_until is not null and paused_until > now() + interval '14 minutes' as paused`,
     [host, outcome],
   );
-  return r.rows[0]?.blocked ?? false;
+  return r.rows[0]?.paused ?? false;
+}
+
+/**
+ * Takes the crawl for this process. Only one runner works on a crawl; another may take over when
+ * the runner stops renewing its lease (it crashed or was stopped).
+ */
+export async function acquireCrawl(db: Db, crawlId: string, runnerId: string): Promise<boolean> {
+  const r = await db.query(
+    `update crawls set runner_id = $2, heartbeat_at = now()
+     where id = $1 and (runner_id is null or runner_id = $2 or heartbeat_at < now() - interval '30 seconds')
+     returning id`,
+    [crawlId, runnerId],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+export async function heartbeat(db: Db, crawlId: string, runnerId: string) {
+  await db.query("update crawls set heartbeat_at = now() where id = $1 and runner_id = $2", [crawlId, runnerId]);
 }
 
 export async function finishItem(db: Db, crawlId: string, hash: Buffer, status: "done" | "failed" | "skipped", httpStatus: number | null, reason: string | null) {
@@ -230,14 +254,21 @@ export async function requeueItem(db: Db, crawlId: string, hash: Buffer, delayMs
   );
 }
 
-export async function pendingCounts(db: Db, crawlId: string): Promise<{ queued: number; fetching: number }> {
-  const r = await db.query<{ queued: number; fetching: number }>(
-    `select count(*) filter (where status = 'queued')::int as queued,
-            count(*) filter (where status = 'fetching')::int as fetching
-     from frontier where crawl_id = $1`,
+/** Queued and in-flight counts, and how many seconds until the next queued URL can be claimed. */
+export async function pendingCounts(db: Db, crawlId: string): Promise<{ queued: number; fetching: number; waitSeconds: number | null }> {
+  const r = await db.query<{ queued: number; fetching: number; wait_seconds: number | null }>(
+    `select count(*) filter (where f.status = 'queued')::int as queued,
+            count(*) filter (where f.status = 'fetching')::int as fetching,
+            extract(epoch from min(greatest(f.not_before, s.next_allowed_at, coalesce(h.paused_until, now())) - now())
+              filter (where f.status = 'queued'))::float8 as wait_seconds
+     from frontier f
+     left join hosts h on h.host = f.host
+     left join sites s on s.site = h.site
+     where f.crawl_id = $1 and f.status in ('queued', 'fetching')`,
     [crawlId],
   );
-  return r.rows[0]!;
+  const row = r.rows[0]!;
+  return { queued: row.queued, fetching: row.fetching, waitSeconds: row.wait_seconds };
 }
 
 /** After a restart, URLs left in "fetching" go back to the queue and stale host leases end. */
@@ -321,8 +352,8 @@ export async function saveRobots(db: Db, host: string, status: number, text: str
   );
 }
 
-export async function blockedHosts(db: Db, hosts: string[]): Promise<string[]> {
-  const r = await db.query<{ host: string }>("select host from hosts where blocked and host = any($1::text[])", [hosts]);
+export async function pausedHosts(db: Db, hosts: string[]): Promise<string[]> {
+  const r = await db.query<{ host: string }>("select host from hosts where paused_until > now() and host = any($1::text[])", [hosts]);
   return r.rows.map((x) => x.host);
 }
 

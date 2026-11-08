@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Db } from "../db/client.js";
 import type { EventBus } from "../events.js";
 import { findContacts } from "../ranking/contacts.js";
@@ -64,6 +64,7 @@ const BLOCKING_STATUSES = new Set([401, 403, 429, 451, 503]);
  */
 export class CrawlRunner {
   private running = new Map<string, Promise<void>>();
+  private readonly runnerId = randomUUID();
   private robots = new Map<string, { policy: RobotsPolicy; at: number }>();
   private stopping = false;
 
@@ -103,6 +104,11 @@ export class CrawlRunner {
     const { db, events } = this.o;
     const crawl = await repo.getCrawl(db, crawlId);
     if (!crawl || ["done", "blocked", "failed"].includes(crawl.status)) return;
+    // One runner per crawl: if another process holds a fresh lease, leave the crawl to it.
+    if (!(await repo.acquireCrawl(db, crawlId, this.runnerId))) {
+      this.o.log.info({ crawlId }, "crawl is running in another process");
+      return;
+    }
     await repo.resetStale(db, crawlId);
     await repo.setCrawlStatus(db, crawlId, "running");
     const state: CrawlState = {
@@ -123,7 +129,10 @@ export class CrawlRunner {
       llm: this.o.llm.enabled ? this.o.llm.model : null,
     });
 
-    const ticker = setInterval(() => void this.emitStats(state), 1500);
+    const ticker = setInterval(() => {
+      void this.emitStats(state);
+      void repo.heartbeat(db, crawlId, this.runnerId).catch(() => {});
+    }, 1500);
     try {
       await Promise.all(Array.from({ length: this.o.workers }, () => this.worker(state)));
     } finally {
@@ -146,7 +155,11 @@ export class CrawlRunner {
         status = "failed";
         detail = `the start page could not be fetched: ${reason}`;
       }
+    } else if (state.claimed === 0 && !this.stopping) {
+      status = "failed";
+      detail = "nothing could be fetched: the site is paused after errors in an earlier crawl";
     }
+    if (this.stopping) return; // stopped mid-crawl: leave it running so a restart resumes it
     await this.emitStats(state);
     await repo.setCrawlStatus(db, crawlId, status, detail);
     await events.emit(crawlId, `crawl.${status}`, { detail, pages: state.claimed });
@@ -164,6 +177,13 @@ export class CrawlRunner {
       if (!item) {
         const pending = await repo.pendingCounts(db, id);
         if (pending.queued === 0 && pending.fetching === 0) return;
+        // Nothing can be claimed for a long time (every remaining host is paused or backing off):
+        // finish instead of waiting, and say why.
+        if (pending.fetching === 0 && (pending.waitSeconds ?? 0) > 300) {
+          const n = await repo.skipQueued(db, id, "host paused or backing off for more than 5 minutes");
+          await this.o.events.emit(id, "page.skipped", { url: state.crawl.seed_url, reason: `${n} queued URLs left: their hosts are paused` });
+          return;
+        }
         await sleep(150);
         continue;
       }
@@ -243,7 +263,7 @@ export class CrawlRunner {
     const outcome: repo.FetchOutcome = slowDown ? "slow_down" : r.status === 0 || r.status >= 500 || r.status === 403 ? "error" : "ok";
     const blocked = await repo.releaseHost(db, item.host, Math.max(delay, Math.min(10_000, r.ms)), outcome, r.retryAfterMs ?? 0);
     if (blocked) {
-      const n = await repo.skipQueued(db, id, "host paused after repeated errors", item.host);
+      const n = await repo.skipQueued(db, id, "host paused for 15 minutes after repeated errors", item.host);
       await events.emit(id, "host.paused", { host: item.host, skipped: n });
     }
 
@@ -468,7 +488,7 @@ export class CrawlRunner {
       });
     }
     // Never queue on a host that is paused.
-    const paused = new Set(await repo.blockedHosts(db, [...new Set(rows.map((r) => r.host))]));
+    const paused = new Set(await repo.pausedHosts(db, [...new Set(rows.map((r) => r.host))]));
     for (const r of rows) if (r.status === "queued" && paused.has(r.host)) Object.assign(r, { status: "skipped", reason: "host paused" });
 
     const fresh = await repo.enqueue(db, id, rows);

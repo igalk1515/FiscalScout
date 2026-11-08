@@ -136,6 +136,44 @@ describe("crawler on a fake city site", () => {
   });
 });
 
+describe("leases and pauses", () => {
+  it("runs a crawl in one runner only, even when two processes try", async () => {
+    const { CrawlRunner } = await import("../src/crawler/runner.js");
+    const second = new CrawlRunner({
+      db,
+      events: ctx.events,
+      llm: ctx.llm,
+      rawDir: ctx.config.RAW_DIR,
+      userAgent: "test",
+      robotsToken: "test",
+      workers: 1,
+      minDelayMs: 30,
+      log: silentLog,
+    });
+    const { crawl } = await startCrawl(ctx, { url: `${site.url}/departments`, maxDepth: 1 });
+    await Promise.all([ctx.runner.start(crawl.id), second.start(crawl.id)]);
+    const started = await db.query("select count(*)::int as n from crawl_events where crawl_id = $1 and type = 'crawl.started'", [crawl.id]);
+    expect(started.rows[0].n).toBe(1);
+    expect((await repo.getCrawl(db, crawl.id))!.status).toBe("done");
+  });
+
+  it("a pause left by an earlier crawl ends, and a long pause does not hang a crawl", async () => {
+    const host = new URL(site.url).host;
+    await db.query("update hosts set paused_until = now() - interval '1 minute' where host = $1", [host]);
+    const a = await startCrawl(ctx, { url: `${site.url}/finance/reports`, maxDepth: 0 });
+    await ctx.runner.start(a.crawl.id);
+    expect((await repo.getCrawl(db, a.crawl.id))!.status).toBe("done");
+
+    await db.query("update hosts set paused_until = now() + interval '1 hour' where host = $1", [host]);
+    const b = await startCrawl(ctx, { url: `${site.url}/poverty`, maxDepth: 0 });
+    await ctx.runner.start(b.crawl.id);
+    const done = await repo.getCrawl(db, b.crawl.id);
+    expect(done!.status).toBe("failed");
+    expect(done!.status_detail).toMatch(/paused/);
+    await db.query("update hosts set paused_until = null where host = $1", [host]);
+  });
+});
+
 describe("a blocked site", () => {
   it("is reported as blocked after one refused request, never bypassed", async () => {
     const { startServer, html, text } = await import("./helpers/server.js");
