@@ -67,9 +67,10 @@ Other commands:
 | `npm run analyze -- <url>` | Ranks one page without a database and prints the reason for every score |
 | `npm run analyze -- page.html --url <original url>` | The same, offline, on a saved page |
 | `npm run crawl -- <url> --depth 3 --budget 300` | One crawl from the command line |
+| `npm run rescore -- <crawl-id> [--llm]` | Re-rank a finished crawl from the saved pages, without fetching (after a rule change) |
 
 Settings (all optional) are in [.env.example](.env.example): `OPENAI_API_KEY`, `OPENAI_MODEL`,
-`CRAWL_WORKERS`, `MIN_HOST_DELAY_MS`, `DATABASE_URL`, `RAW_DIR`.
+`LLM_MAX_USD_PER_CRAWL`, `CRAWL_WORKERS`, `MIN_HOST_DELAY_MS`, `DATABASE_URL`, `RAW_DIR`.
 
 ---
 
@@ -142,6 +143,14 @@ link text, URL, heading and about 200 characters of nearby text. The LLM never s
 or a whole site. The answer must match a strict JSON schema and is validated in code. Answers
 are cached by input, so a rerun costs nothing. If the call fails, the rules score stays. With no
 `OPENAI_API_KEY`, the tier is off.
+
+After the LLM answers, the same multipliers as the rules still apply (older fiscal years, drafts,
+and pages on the entity's own site, which are nearly always the list rather than the document),
+so the LLM confirms what a link is without flattening the ranking.
+
+**Cost.** `gpt-4o-mini` by default. A crawl of the three reachable test sites (about 900 pages)
+cost a few cents. `LLM_MAX_USD_PER_CRAWL` (default $0.50) is a hard cap: past it, the crawl
+continues on rules alone and emits an `llm.capped` event.
 
 ### Contacts
 
@@ -263,7 +272,6 @@ in [eval/must-find.json](eval/must-find.json) and writes [eval/results.md](eval/
   `needs_browser`. The link to them is still found and ranked. A headless browser for those pages
   is the next step.
 - **Scanned PDFs** are not read. Documents are ranked by their link, not their content.
-- The LLM tier has been tested against a fake API only; the results above are rules only.
 
 ## At scale
 

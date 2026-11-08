@@ -62,6 +62,11 @@ describe("text helpers", () => {
     const $ = parseHtml("<div><p>Marti Praschan,<br> Chief Financial Officer</p><div>734.794.6500</div></div>");
     expect(blockText($("div").get(0)!)).toBe("Marti Praschan,\nChief Financial Officer\n734.794.6500");
   });
+  it("skips an email address written as a relative link", () => {
+    const page = extractPage('<a href="sro.jane.doe@boerneisd.net">Email</a><a href="/finance">Finance</a>', "https://www.boerneisd.net/a");
+    expect(page.links.map((l) => l.url)).toEqual(["https://www.boerneisd.net/finance"]);
+  });
+
   it("reads meta robots and canonical", () => {
     const page = extractPage(
       '<html><head><meta name="robots" content="noindex, nofollow"><link rel="canonical" href="/a?b=1#x"></head><body></body></html>',

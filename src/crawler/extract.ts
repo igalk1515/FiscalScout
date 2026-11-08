@@ -152,7 +152,10 @@ export function extractPage(html: string | CheerioAPI, pageUrl: string): PageExt
       return;
     }
     const heading = pseudoHeading ? (realHeading ? `${realHeading} › ${pseudoHeading}` : pseudoHeading) : realHeading;
-    const url = normalizeUrl($(el).attr("href") ?? "", base);
+    const href = ($(el).attr("href") ?? "").trim();
+    // An email address written as a relative link ("jane.doe@city.gov") is not a page.
+    if (/^[^\s:/?#]+@[^\s:/?#]+\.[a-z]{2,}$/i.test(href)) return;
+    const url = normalizeUrl(href, base);
     if (!url || url === pageNorm) return;
     const anchor = anchorText($, el);
     const candidate: LinkCandidate = {
