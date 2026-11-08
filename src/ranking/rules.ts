@@ -26,6 +26,8 @@ export interface LinkScore {
   decidedBy?: "rules" | "llm";
   /** The link points inside the crawl's scope. */
   internal?: boolean;
+  /** A paper about a document ("Budget Responses", "Hearing Notice"), not the document itself. */
+  supportingPaper?: boolean;
 }
 
 export interface ScoreContext {
@@ -148,6 +150,7 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
 
   // ---- target score
   let target = best.target;
+  let supportingPaper = false;
   const notes = [...best.notes];
   if (target > 0) {
     if (isDoc) {
@@ -176,7 +179,8 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
     // went past 1 (otherwise FY2026 and FY2025 budgets would both sit at 1.00).
     target = Math.min(1, target);
     const paperWords = `${anchor} ${link.titleAttr} ${urlWords(fileName)}`;
-    if (best.kind === "document" && SUPPORTING_PAPER.test(paperWords)) {
+    supportingPaper = best.kind === "document" && SUPPORTING_PAPER.test(paperWords);
+    if (supportingPaper) {
       target *= 0.6;
       notes.push(`a paper about the document ('${paperWords.match(SUPPORTING_PAPER)![0]}'), not the document itself (x0.60)`);
     }
@@ -233,5 +237,6 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
     reason: target > 0 ? notes.join("; ") : pNotes.length ? `path: ${pNotes.join(", ")}` : "no signal",
     noise,
     internal: ctx.internal,
+    supportingPaper,
   };
 }

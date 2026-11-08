@@ -44,6 +44,10 @@ export async function applyLlmTier(
           target *= 0.85;
           notes.push("draft (x0.85)");
         }
+        if (x.s.supportingPaper) {
+          target *= 0.6;
+          notes.push("a paper about the document, not the document itself (x0.60)");
+        }
         if (x.s.type === "page" && x.s.internal) {
           // A page on the entity's own site about budgets is nearly always the list of budgets.
           target *= 0.6;

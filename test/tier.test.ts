@@ -50,6 +50,18 @@ describe("LLM tier", () => {
     expect(xs[0]!.s.pathScore).toBeGreaterThanOrEqual(0.9); // still a page worth crawling
   });
 
+  it("keeps a paper about the budget below the budget, even when the LLM is sure", async () => {
+    const paper = link("https://cdn.gov/260501-fy27-budget-responses.pdf", "FY27 Budget Responses");
+    const xs = [{ link: paper, s: scoreLink(paper, { groups, parentPathScore: 0.9, internal: false, now: NOW }) }];
+    expect(xs[0]!.s.supportingPaper).toBe(true);
+    const fake: LlmClient = {
+      enabled: true, model: "fake", extractContacts: async () => [],
+      classifyLinks: async (items) => items.map((it) => ({ i: it.i, doc_type: "budget", target_score: 0.9, path_score: 0, reason: "budget" })),
+    };
+    await applyLlmTier(fake, groups, xs, undefined, NOW);
+    expect(xs[0]!.s.targetScore).toBeCloseTo(0.54);
+  });
+
   it("keeps the rules scores when the call fails", async () => {
     const xs = [link("https://x.edu/a-2026-annual-comp-fin-rpt.pdf", "Annual comprehensive financial report 2026")].map((l) => ({
       link: l,
