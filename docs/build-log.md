@@ -144,3 +144,33 @@ Fixes:
 - A bold line used as a heading is added to the real heading instead of replacing it.
 - One contact per person per crawl: same name, or same email under a shorter name.
 - A line like "Prepared by: Tom Crawford, CFO" is read as Tom Crawford, not the name above it.
+
+## More fixes from real crawls
+
+- **Pauses that never ended.** A host paused in one crawl stayed paused for every later crawl,
+  so a later ASU crawl never fetched its start page. Pauses now last 15 minutes, and a crawl
+  whose remaining hosts all wait longer than 16 minutes ends with the reason instead of
+  waiting forever.
+- **One crawl, two runners.** The API server, when it started, resumed crawls that the CLI had
+  just created, so both processes worked on them. A crawl now has a lease renewed every 1.5
+  seconds; another process takes it over only when the lease is 30 seconds stale. Tested with
+  two runners started on one crawl: one `crawl.started`.
+- **Supporting papers still ranked high.** The sum of signals often went past 1, so a -0.20
+  penalty disappeared in the cap. Multipliers now come after the cap: a paper about a document
+  x0.6, older years x0.6-1.0. Ann Arbor's "FY27 Budget Responses" now rank below the budget books.
+- **Contacts that were not people.** "ASU Research Park" and "Learning Enterprise" were read as
+  names. Acronyms and organization words are rejected; titles taken from sentences are cleaned.
+- **A long Retry-After.** ASU asked for a long pause after two 429s. It is honored (capped at
+  10 minutes), and the crawl waits instead of giving up after 5 minutes.
+- **Re-rank from disk.** `npm run rescore` re-ranks a crawl from the saved pages in seconds,
+  without contacting the sites. This is the reason raw pages are kept.
+
+## LLM tier against the real API
+
+An OpenAI key was added to `.env` (ignored by git). `npm run analyze` on the saved ASU pages:
+
+- The four ACFRs the rules left unsure (0.52-0.69) were confirmed as `acfr` by the LLM. At
+  first all four came back as 1.00, losing the year order, so the year and draft multipliers
+  now apply after the LLM too.
+- Morgan R. Olsen's contact was read by the LLM and passed the check against the page text.
+- The strict JSON schema was accepted by `gpt-4o-mini`. Cost of the check: $0.0003.
