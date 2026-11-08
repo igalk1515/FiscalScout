@@ -18,6 +18,8 @@ const Env = z.object({
     .transform((v) => (v && v.trim() ? v.trim() : undefined)),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   OPENAI_BASE_URL: z.string().default("https://api.openai.com/v1"),
+  /** Hard cap on LLM spend per crawl. Past it, the crawl continues on rules alone. */
+  LLM_MAX_USD_PER_CRAWL: z.coerce.number().min(0).default(0.5),
   BOT_NAME: z.string().default("HighValueLinkScraper/0.1"),
   BOT_URL: z.string().default("https://github.com/igalk1515/high-value-link-scraper"),
   CRAWL_WORKERS: z.coerce.number().int().min(1).max(16).default(3),

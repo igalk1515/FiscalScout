@@ -174,6 +174,40 @@ describe("leases and pauses", () => {
   });
 });
 
+describe("LLM spending cap", () => {
+  it("stops calling the LLM once a crawl reaches its cap, and the crawl continues on rules", async () => {
+    let calls = 0;
+    const pricey = {
+      enabled: true,
+      model: "pricey",
+      classifyLinks: async (items: { i: number }[], _g: unknown, onCall?: (c: { cached: boolean; costUsd: number }) => void) => {
+        calls++;
+        onCall?.({ cached: false, costUsd: 0.4 });
+        return items.map((it) => ({ i: it.i, doc_type: null, target_score: 0.3, path_score: 0.3, reason: "x" }));
+      },
+      extractContacts: async (_b: string, onCall?: (c: { cached: boolean; costUsd: number }) => void) => {
+        calls++;
+        onCall?.({ cached: false, costUsd: 0.4 });
+        return [];
+      },
+    };
+    const capped = await createContext({
+      db,
+      log: silentLog,
+      llm: pricey,
+      config: { CRAWL_WORKERS: 1, MIN_HOST_DELAY_MS: 30, LLM_MAX_USD_PER_CRAWL: 0.5, RAW_DIR: mkdtempSync(join(tmpdir(), "raw-")) },
+    });
+    const { crawl } = await startCrawl(capped, { url: `${site.url}/`, maxDepth: 2, pageBudget: 20 });
+    await capped.runner.start(crawl.id);
+    const done = await repo.getCrawl(db, crawl.id);
+    expect(done!.status).toBe("done");
+    expect(calls).toBe(2); // 0.4 + 0.4 passes 0.5; nothing after that
+    const ev = await db.query("select count(*)::int as n from crawl_events where crawl_id = $1 and type = 'llm.capped'", [crawl.id]);
+    expect(ev.rows[0].n).toBe(1);
+    await capped.close();
+  });
+});
+
 describe("a blocked site", () => {
   it("is reported as blocked after one refused request, never bypassed", async () => {
     const { startServer, html, text } = await import("./helpers/server.js");

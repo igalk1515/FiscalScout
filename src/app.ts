@@ -53,6 +53,7 @@ export async function createContext(overrides: ContextOverrides = {}): Promise<A
     robotsToken,
     workers: config.CRAWL_WORKERS,
     minDelayMs: config.MIN_HOST_DELAY_MS,
+    llmMaxUsdPerCrawl: config.LLM_MAX_USD_PER_CRAWL,
     log,
   });
   return {

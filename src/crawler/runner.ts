@@ -41,6 +41,8 @@ export interface RunnerOptions {
   /** Share of claims that pick a random queued URL instead of the best one. */
   exploreRate?: number;
   maxAttempts?: number;
+  /** Hard cap on LLM spend per crawl, in dollars. */
+  llmMaxUsdPerCrawl?: number;
 }
 
 interface CrawlState {
@@ -52,6 +54,9 @@ interface CrawlState {
   seedOutcome: { status: number; reason: string } | null;
   llmCalls: number;
   llmCost: number;
+  /** Spend of the whole crawl so far, including earlier runs of it. */
+  llmSpent: number;
+  llmCapped: boolean;
 }
 
 const ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
@@ -121,6 +126,8 @@ export class CrawlRunner {
       seedOutcome: null,
       llmCalls: 0,
       llmCost: 0,
+      llmSpent: crawl.llm_cost_usd,
+      llmCapped: false,
     };
     await events.emit(crawlId, "crawl.started", {
       seed: crawl.seed_url,
@@ -222,7 +229,19 @@ export class CrawlRunner {
   private onLlmCall = (state: CrawlState) => (c: CallInfo) => {
     if (!c.cached) state.llmCalls++;
     state.llmCost += c.costUsd;
+    state.llmSpent += c.costUsd;
   };
+
+  /** The LLM client while the crawl is under its spending cap; a disabled one after. */
+  private llmFor(state: CrawlState): LlmClient {
+    const cap = this.o.llmMaxUsdPerCrawl ?? 0.5;
+    if (!this.o.llm.enabled || state.llmSpent < cap) return this.o.llm;
+    if (!state.llmCapped) {
+      state.llmCapped = true;
+      void this.o.events.emit(state.crawl.id, "llm.capped", { spent_usd: state.llmSpent, cap_usd: cap });
+    }
+    return { ...this.o.llm, enabled: false };
+  }
 
   private async process(state: CrawlState, item: repo.FrontierItem) {
     const { db, events } = this.o;
@@ -338,7 +357,7 @@ export class CrawlRunner {
       link,
       s: scoreLink(link, { groups: state.groups, parentPathScore: item.path_score, internal: inScope(link.url, scope) }),
     }));
-    await applyLlmTier(this.o.llm, state.groups, scored, this.onLlmCall(state));
+    await applyLlmTier(this.llmFor(state), state.groups, scored, this.onLlmCall(state));
 
     const results = scored.filter((x) => x.s.targetScore > 0);
     const saved = await repo.saveLinks(
@@ -384,7 +403,7 @@ export class CrawlRunner {
       groups: state.groups,
       entityDomain: scope.domain,
       pagePathScore: item.path_score,
-      llm: this.o.llm,
+      llm: this.llmFor(state),
       onLlmCall: this.onLlmCall(state),
     });
     if (contacts.length) {
