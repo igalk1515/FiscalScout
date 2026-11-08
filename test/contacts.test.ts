@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractPage, parseHtml } from "../src/crawler/extract.js";
-import { cleanName, findContacts, parseContactLines, verifyAgainstBlock } from "../src/ranking/contacts.js";
+import { cleanName, cleanTitle, findContacts, parseContactLines, verifyAgainstBlock } from "../src/ranking/contacts.js";
 import { compileKeywords, DEFAULT_KEYWORDS } from "../src/ranking/keywords.js";
 import type { LlmClient } from "../src/ranking/llm.js";
 import { fixture, type FixtureName } from "./helpers/fixtures.js";
@@ -44,6 +44,14 @@ describe("names and verification", () => {
     expect(cleanName("Wesley Scott, CPA, RTSBA")).toBe("Wesley Scott");
     expect(cleanName("Finance Department")).toBeNull();
     expect(cleanName("Contact Us")).toBeNull();
+    expect(cleanName("ASU Research Park")).toBeNull();
+    expect(cleanName("Learning Enterprise")).toBeNull();
+  });
+
+  it("cleans a title taken from a sentence", () => {
+    expect(cleanTitle("is the vice president for Financial Services and the deputy treasurer.&nbsp; Maryanne Patterson", "Anjali Halabe")).toBe(
+      "vice president for Financial Services and the deputy treasurer",
+    );
   });
 
   it("reads the person after a label, not the name on the line above", () => {

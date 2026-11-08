@@ -1,0 +1,1367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>High-Value Link Scraper</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap">
+<style>
+/* Layout: report column with a sticky contents rail on wide screens; diagrams sit in their own scroll frames */
+:root {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --fg: #17202c;
+  --muted: #566275;
+  --line: #d7dde6;
+  --code-bg: #edf0f4;
+  --accent: #1c5ea6;
+  --accent-soft: #e2ecf8;
+  --cost: #9c5a00;
+  --cost-soft: #faeedb;
+  --ok: #21704a;
+  --ok-soft: #dff1e7;
+  --font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-body: "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1219; --surface: #141b24; --fg: #e1e7ef; --muted: #97a3b4; --line: #28313d;
+    --code-bg: #10161e; --accent: #7cafea; --accent-soft: #182739; --cost: #efb25e; --cost-soft: #30230f;
+    --ok: #6bc795; --ok-soft: #12271b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1219; --surface: #141b24; --fg: #e1e7ef; --muted: #97a3b4; --line: #28313d;
+  --code-bg: #10161e; --accent: #7cafea; --accent-soft: #182739; --cost: #efb25e; --cost-soft: #30230f;
+  --ok: #6bc795; --ok-soft: #12271b; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--font-body); }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.wrap {
+  max-width: 1160px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 96px;
+  display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 48px;
+}
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 28px); align-self: start; font-size: 13.5px; }
+.toc-label { font: 500 11.5px/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px 12px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.toc a { display: block; padding: 5px 12px; border-left: 2px solid var(--line); color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--fg); border-left-color: var(--accent); }
+main { min-width: 0; }
+
+.eyebrow { font: 500 12px/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0; }
+h1 { font: 700 46px/1.08 var(--font-display); letter-spacing: -.015em; margin: 12px 0 16px; text-wrap: balance; }
+.lede { font-size: 18.5px; line-height: 1.55; max-width: 62ch; margin: 0 0 14px; }
+.meta { color: var(--muted); font-size: 13.5px; margin: 0; font-variant-numeric: tabular-nums; }
+
+main > section { margin-top: 64px; scroll-margin-top: 24px; }
+h2 { font: 700 29px/1.2 var(--font-display); margin: 0 0 14px; text-wrap: balance; }
+h3 { font: 600 17px/1.35 var(--font-body); margin: 30px 0 10px; text-wrap: balance; }
+p { margin: 0 0 14px; max-width: 70ch; }
+ul.list { margin: 0 0 18px; padding-left: 20px; max-width: 70ch; display: grid; gap: 6px; }
+strong { font-weight: 600; }
+
+code { font-family: var(--font-mono); font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { font: 12.5px/1.6 var(--font-mono); background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 0 0 18px; }
+pre code { background: none; padding: 0; font-size: inherit; }
+.pre-label { font: 500 11.5px/1.4 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+
+.table-wrap { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.5; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 11.5px/1.4 var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--code-bg); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td code { white-space: nowrap; }
+
+figure { margin: 6px 0 24px; }
+.dg { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.dg svg { display: block; width: 100%; height: auto; min-width: 620px; color: var(--fg); }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 10px; max-width: 76ch; }
+
+/* diagram parts, styled from the page tokens */
+.dg .box { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.dg .box.cost { fill: var(--cost-soft); stroke: var(--cost); }
+.dg .box.accent { fill: var(--accent-soft); stroke: var(--accent); }
+.dg .box.ghost { fill: none; stroke: var(--muted); stroke-opacity: .55; stroke-dasharray: 5 4; }
+.dg .t.ghost { fill: var(--muted); font-weight: 500; }
+.dg .s.ghost { fill: var(--muted); font-style: italic; }
+.dg .ln.ghost { stroke-opacity: .55; stroke-dasharray: 5 4; }
+.dg .lbl.ghost { fill: var(--muted); font-style: italic; }
+.quote { margin: 0 0 20px; padding: 14px 18px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; max-width: 70ch; }
+.quote p { margin: 0 0 8px; font-size: 15.5px; }
+.quote p:last-child { margin: 0; }
+.quote .src { font: 500 11.5px/1.4 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.dg .t { fill: var(--fg); font: 600 13px var(--font-body); }
+.dg .s { fill: var(--muted); font: 400 11px var(--font-body); }
+.dg .lbl { fill: var(--muted); font: 500 11px var(--font-body); }
+.dg .lbl.accent { fill: var(--accent); }
+.dg .lbl.cost { fill: var(--cost); }
+.dg .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.dg .ln.accent { stroke: var(--accent); stroke-width: 2; }
+.dg .ln.cost { stroke: var(--cost); }
+.dg .mk { fill: var(--muted); }
+.dg .mk.accent { fill: var(--accent); }
+.dg .mk.cost { fill: var(--cost); }
+
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 0 0 20px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; min-width: 0; }
+.tile h4 { font: 600 15px/1.35 var(--font-body); margin: 0 0 6px; }
+.tile p { font-size: 14.5px; margin: 0; }
+.tile .k { font: 500 11.5px/1.4 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+.tile .ex { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
+
+.pill { display: inline-block; font: 600 10.5px/1 var(--font-body); letter-spacing: .06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.must { background: var(--ok-soft); color: var(--ok); }
+.pill.should { background: var(--accent-soft); color: var(--accent); }
+.pill.design { background: var(--code-bg); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+.pill.cost { background: var(--cost-soft); color: var(--cost); }
+.pill.could { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+.stack { font: 13px/1.7 var(--font-mono); color: var(--muted); margin: 0 0 18px; max-width: 80ch; }
+
+.toc-group { font: 600 12.5px/1.4 var(--font-body); color: var(--fg); margin: 20px 0 6px 12px; }
+.part { margin-top: 96px; padding-top: 22px; border-top: 2px solid var(--fg); scroll-margin-top: 24px; }
+.part-k { font: 500 12px/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px; }
+.part-h { font: 700 40px/1.1 var(--font-display); letter-spacing: -.01em; margin: 0 0 12px; text-wrap: balance; }
+.part p { font-size: 17px; }
+.part + section { margin-top: 40px; }
+h3[id] { scroll-margin-top: 24px; }
+.dg.wide svg { min-width: 860px; }
+
+.layers { list-style: none; margin: 0 0 16px; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.layer { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 16px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.layer:last-child { border-bottom: 0; }
+.layer.base { background: var(--code-bg); }
+.layer-name { display: grid; gap: 2px; min-width: 0; }
+.layer-k { font: 600 15px/1.3 var(--font-body); }
+.layer-role { font-size: 13px; line-height: 1.4; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin: 0 0 18px; }
+.layer .chips { margin: 0; }
+.chip { font: 500 12.5px/1 var(--font-mono); padding: 6px 9px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.chip.cost { background: var(--cost-soft); color: var(--cost); }
+.chip.plain { background: var(--code-bg); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+@media (max-width: 640px) { .layer { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
+
+.hard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 0 0 20px; }
+.hard .tile h4 { margin-bottom: 10px; }
+.ab { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr); gap: 6px 10px; font-size: 14px; line-height: 1.5; margin: 0; }
+.ab dt { font: 600 11px/1.9 var(--font-mono); color: var(--accent); }
+.ab dt.b { color: var(--muted); }
+.ab dd { margin: 0; min-width: 0; }
+.tile .more { display: inline-block; margin-top: 10px; font-size: 13px; }
+.path { font-size: 14.5px; color: var(--muted); }
+.path a { word-break: break-word; }
+@media (max-width: 760px) { .hard { grid-template-columns: minmax(0, 1fr); } }
+
+@media (max-width: 960px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-block: 28px 72px; }
+  .toc { position: static; }
+  .toc-label { margin-left: 0; }
+  .toc-group { margin-left: 0; }
+  .part-h { font-size: 33px; }
+  .toc ol { display: flex; flex-wrap: wrap; gap: 6px; }
+  .toc a { border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
+  h1 { font-size: 36px; }
+}
+@media (max-width: 560px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  h1 { font-size: 31px; }
+  h2 { font-size: 25px; }
+  .part-h { font-size: 29px; }
+  .lede { font-size: 17px; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <p class="toc-label">Contents</p>
+    <ol>
+      <li><a href="#summary">Summary</a></li>
+      <li><a href="#brief">What the brief asks</a></li>
+      <li><a href="#targets">What we look for</a></li>
+    </ol>
+    <p class="toc-group">Design A · We build</p>
+    <ol>
+      <li><a href="#scope">Scope and order</a></li>
+      <li><a href="#build">Build steps</a></li>
+      <li><a href="#testset">Test set</a></li>
+      <li><a href="#stack">Stack</a></li>
+      <li><a href="#hard">Hard problems</a></li>
+      <li><a href="#crawl">Architecture</a></li>
+      <li><a href="#fetch">Fetching</a></li>
+      <li><a href="#ranking">Link ranking</a></li>
+      <li><a href="#contacts">Contacts and files</a></li>
+      <li><a href="#data">Data model</a></li>
+      <li><a href="#api">API</a></li>
+      <li><a href="#live">Live view</a></li>
+      <li><a href="#eval">Evaluation</a></li>
+      <li><a href="#readme">README</a></li>
+    </ol>
+    <p class="toc-group">Design B · Ambitious</p>
+    <ol>
+      <li><a href="#compare">A vs B</a></li>
+      <li><a href="#scale">Architecture</a></li>
+      <li><a href="#content">Search inside documents</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+      <li><a href="#pressure">Where it gets hard</a></li>
+    </ol>
+    <p class="toc-group">Both</p>
+    <ol>
+      <li><a href="#decisions">Decisions</a></li>
+      <li><a href="#questions">Open questions</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header>
+      <p class="eyebrow">Pursuit take-home · System design</p>
+      <h1>High-Value Link Scraper</h1>
+      <p class="lede">A scraper that reads a public entity's web pages and ranks every link by how likely it is to lead to a budget, an annual financial report or a finance contact. It pulls out the contacts and files themselves, ranks cheaply first and with an LLM only when needed, stores every result with the page it came from, and serves the data through a small, well-shaped API that also shows a crawl live.</p>
+      <p class="meta">Igal Babushkin · Draft 3, as built · November 8, 2026 · <a href="https://github.com/igalk1515/high-value-link-scraper">github.com/igalk1515/high-value-link-scraper</a></p>
+    </header>
+
+    <section id="summary" aria-labelledby="h-summary">
+      <h2 id="h-summary">Summary</h2>
+      <p>This page holds two designs. <a href="#design-a">Design A</a> is what the take-home builds: one process and one database, built in the order the brief cares about. <a href="#design-b">Design B</a> is the ambitious version at Pursuit's real scale: the same stages split into independent pools, two stores, and search by meaning inside the documents themselves. Design B is written up, not built.</p>
+      <div class="grid2">
+        <div class="tile">
+          <p class="k">Rank</p>
+          <h4>Cheapest tier that can decide</h4>
+          <p>Rules score every link for free, with keywords and weights set per crawl. An LLM sees only the links that are still unclear, in batches.</p>
+        </div>
+        <div class="tile">
+          <p class="k">Extract</p>
+          <h4>Contacts and files are results</h4>
+          <p>A finance contact comes out as a name, title, email and phone, checked against the page text. A file comes out with its document type and fiscal year.</p>
+        </div>
+        <div class="tile">
+          <p class="k">Crawl</p>
+          <h4>Focused, not exhaustive</h4>
+          <p>The crawler always fetches the most promising unseen URL next, so a page budget lands on the finance pages instead of the events calendar.</p>
+        </div>
+        <div class="tile">
+          <p class="k">Store</p>
+          <h4>Provenance on every record</h4>
+          <p>Each link keeps every page it was found on, with anchor text, section heading and nearby text. Unique keys and indexes keep writes idempotent and reads fast as volume grows.</p>
+        </div>
+        <div class="tile">
+          <p class="k">Serve</p>
+          <h4>A small, well-shaped API</h4>
+          <p>Start a crawl, filter and page through links and contacts, and read the OpenAPI docs generated from the same schemas that validate requests.</p>
+        </div>
+        <div class="tile">
+          <p class="k">Watch</p>
+          <h4>Every crawl is visible live</h4>
+          <p>An event stream and a small watch page show the page being fetched now, counters, skipped pages with the reason, and the best results so far.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="brief" aria-labelledby="h-brief">
+      <h2 id="h-brief">What the brief asks</h2>
+      <p>The design starts from the brief, in the order the brief gives weight to. Two lines set that order.</p>
+      <div class="quote">
+        <p class="src">Objective</p>
+        <p>"Build a web scraper that identifies high-value links on a web page, focusing on extracting relevant contacts and specific files (like "ACFR," "Budget," or related terms). The scraper can/should use an ML model, LLM, or another intelligent approach to prioritize relevant links. Additionally, provide an API to access the scraped data."</p>
+        <p class="src">Important notes</p>
+        <p>"Beyond achieving the Objective, there are no strict requirements … A lot of people might not finish it but prioritizing what's important is a skill."</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>The brief asks for</th><th>Our answer</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1</td><td>High-value links on a page, focused on contacts and specific files, ranked by an intelligent approach</td><td>Rules score every link. An LLM decides the unclear ones. Contacts and files come out as their own results, not only as links.</td><td><a href="#ranking">Ranking</a>, <a href="#contacts">Contacts and files</a></td></tr>
+            <tr><td class="num">2</td><td>Adjustable keyword prioritization, such as "Budget", "ACFR" and "Finance Director"</td><td>Each crawl takes its own keywords, weights and synonyms.</td><td><a href="#keywords">Keywords</a></td></tr>
+            <tr><td class="num">3</td><td>An API to access the data, with good architecture and design</td><td>Versioned REST, crawls in the background, filters, keyset pagination, one error shape, generated OpenAPI docs, and a live event stream.</td><td><a href="#api">API</a>, <a href="#live">Live view</a></td></tr>
+            <tr><td class="num">4</td><td>Store URL, type, relevance score and keywords, built for scale</td><td>One Postgres. Unique keys make every write an idempotent upsert, writes are batched per page, and indexes match the API's filters.</td><td><a href="#data">Data model</a></td></tr>
+            <tr><td class="num">5</td><td>Documentation: setup, prioritization approach, API usage</td><td>A README with those three parts, plus known limits.</td><td><a href="#readme">README</a></td></tr>
+            <tr><td class="num">6</td><td>Thought about millions of pages a day, without having to build it</td><td>Design B, written up with numbers and the points where it breaks.</td><td><a href="#design-b">Design B</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>So the first thing built is one page analyzed end to end: ranked links, contacts and files, stored and served by the API. The crawler comes next, because on all four test sites the targets sit two to four clicks from the home page.</p>
+    </section>
+
+    <section id="targets" aria-labelledby="h-targets">
+      <h2 id="h-targets">What we look for</h2>
+      <p>Before any code, these are the targets on the four test sites, found by hand on November 7, 2026. They become the must-find list the crawler is measured against.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Target</th><th>What it is</th><th>Why it matters to Pursuit</th></tr></thead>
+          <tbody>
+            <tr><td>ACFR</td><td>Audited financial statements for the year that ended. Texas school districts call it the Annual Financial Report.</td><td>Shows what the entity spent, owes and holds in reserve.</td></tr>
+            <tr><td>Budget</td><td>The adopted or proposed plan for the coming fiscal year, by department and fund.</td><td>Planned purchases show up here months before an RFP.</td></tr>
+            <tr><td>Single audit</td><td>Audit of federal grant spending, often published next to the ACFR.</td><td>Points to federal money that comes with spending rules.</td></tr>
+            <tr><td>Finance contact</td><td>CFO, Finance Director, Controller or Budget Manager, with email or phone.</td><td>The person a vendor needs to reach.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Ann Arbor · a2gov.org</h3>
+      <p class="path">Home → Departments → Finance and Administrative Services → <a href="https://www.a2gov.org/finance-and-administrative-services/financial-reporting/">Financial Reporting</a>, the hub page.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Target</th><th>Link text on the site</th><th>Where the file lives</th></tr></thead>
+          <tbody>
+            <tr><td>ACFR FY2025</td><td>"Fiscal Year 2025", under the heading "Annual Comprehensive Financial Report (ACFR)"</td><td><a href="https://media-001-us.cdn.govstack.com/a2gov-002-us/media/v2abzw2u/city-of-ann-arbor-6-30-25-acfr-final.pdf">govstack CDN · PDF</a></td></tr>
+            <tr><td>Single audit FY2025</td><td>"Fiscal Year 2025", under "Single Audits"</td><td><a href="https://media-001-us.cdn.govstack.com/a2gov-002-us/media/ebznvooc/city-of-ann-arbor-6-30-25-saac-final.pdf">govstack CDN · PDF</a></td></tr>
+            <tr><td>Budget FY2027</td><td>"Adopted Budget FY2027"</td><td><a href="https://city-ann-arbor-mi-cleardoc.cleargov.com/23859">ClearGov · a slow JavaScript app, not a PDF</a></td></tr>
+            <tr><td>Budget FY2026</td><td>"Adopted Budget FY2026"</td><td><a href="https://www.a2gov.org/media/je4nrvnr/fy26-budget-book.pdf">a2gov.org · PDF</a></td></tr>
+            <tr><td>Finance contact</td><td>Marti Praschan, Chief Financial Officer · mpraschan@a2gov.org</td><td><a href="https://www.a2gov.org/finance-and-administrative-services/">Finance page</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Boerne ISD · boerneisd.net</h3>
+      <p class="path">Home → Business &amp; Financial Services → Financial Transparency, on boerneisd.smartsiteshost.com → <a href="https://www.boerneisd.net/82157_4">Annual Financial Reports</a> and <a href="https://www.boerneisd.net/82153_4">Adopted Budgets</a>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Target</th><th>Link text on the site</th><th>Where the file lives</th></tr></thead>
+          <tbody>
+            <tr><td>Annual Financial Report FY2025</td><td>".pdf 2026-07-26 Annual Financial Report: June 30, 2025"</td><td><a href="https://files.smartsites.parentsquare.com/13370/2025acfrfinal.pdf">ParentSquare file host · PDF</a></td></tr>
+            <tr><td>Annual Financial Report FY2023</td><td>"Annual Financial Report: June 30, 2023"</td><td><a href="https://files.smartsites.parentsquare.com/13370/acfr-2023_11-09-23_draft.pdf">The linked file is a draft</a></td></tr>
+            <tr><td>Budget 2026–27</td><td>"2026-27 Adopted Budget", plus an Excel version</td><td><a href="https://files.smartsites.parentsquare.com/13370/2026-2027_bisd_adopted_budget.pdf">ParentSquare file host · PDF</a></td></tr>
+            <tr><td>Finance contact</td><td>Wesley Scott, CPA, RTSBA, Chief Financial Officer · wesley.scott@boerneisd.net</td><td><a href="https://www.boerneisd.net/411496_2">Business &amp; Financial Services</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Arizona State University · asu.edu</h3>
+      <p class="path">The main menu is built by JavaScript, so the raw HTML has no finance menu. One footer link still gets there without a browser: Home → "Jobs" (cfo.asu.edu/applicant) → Business and Finance → <a href="https://cfo.asu.edu/financial-reports">Financial Reports</a>, the hub. Checked November 8, 2026.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Target</th><th>Link text on the site</th><th>Where the file lives</th></tr></thead>
+          <tbody>
+            <tr><td>ACFR 2026</td><td>"Annual comprehensive financial report 2026"</td><td><a href="https://www.asu.edu/fs/documents/annual_reports/ASU-2026-Annual-comp-fin-rpt.pdf">asu.edu · PDF</a></td></tr>
+            <tr><td>Site error</td><td>"Comprehensive annual financial report 2020"</td><td><a href="https://www.asu.edu/fs/documents/annual_reports/ASU-2025-Annual-comp-fin-rpt.pdf">Opens the 2025 file</a></td></tr>
+            <tr><td>Operating budget FY2027</td><td>"FY 2027", on the Annual Operating Budget page</td><td><a href="https://cfo.asu.edu/annual-operating-budget">Board of Regents SharePoint</a>: item 4.9 inside a 12.6 MB board book</td></tr>
+            <tr><td>Finance contact</td><td>Morgan R. Olsen, Executive Vice President, Treasurer and CFO</td><td><a href="https://cfo.asu.edu/">cfo.asu.edu</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Bozeman · bozeman.net → bozemanmt.gov</h3>
+      <p class="path">This site blocks script clients, so these rows come from search results and need to be confirmed in a browser. The hub is <a href="https://www.bozemanmt.gov/departments/finance/budget-and-financial-reports">Budget and Financial Reports</a>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Target</th><th>Link text on the site</th><th>Where the file lives</th></tr></thead>
+          <tbody>
+            <tr><td>Annual financial reports FY2014–FY2025</td><td>Listed on the hub page</td><td>bozemanmt.gov, served from <code>/home/showpublisheddocument/{id}/{ticks}</code></td></tr>
+            <tr><td>Budgets up to the FY2027 recommended budget</td><td>Listed on the hub page</td><td>Same host and pattern</td></tr>
+            <tr><td>Finance contact</td><td>Melissa Hodnett, Finance Director. Also listed: Aaron Funk, Controller, and Kaitlin Johnson, Budget Manager.</td><td><a href="https://www.bozemanmt.gov/departments/finance/contact-us">Finance contact page</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>What this changes in the design</h3>
+      <ul class="list">
+        <li><strong>One hub page per entity.</strong> Each site has one finance page that lists most of the targets, two to four clicks from home. Finding the hub is most of the work.</li>
+        <li><strong>Files live on other hosts.</strong> Every site keeps its files somewhere else: a CDN, a school-site file host, ClearGov or SharePoint. The crawl scope has to include file hosts linked from the entity's own pages.</li>
+        <li><strong>The heading carries the meaning.</strong> Anchors often say only "Fiscal Year 2025". The heading above the link says what the document is.</li>
+        <li><strong>The title varies.</strong> Three of the four sites say Chief Financial Officer. Only Bozeman says Finance Director.</li>
+        <li><strong>Sites contain mistakes.</strong> A draft is linked as the report, and a 2020 link opens the 2025 file. The crawler should read the year inside the document, not trust the anchor.</li>
+      </ul>
+    </section>
+
+    <div class="part" id="design-a">
+      <p class="part-k">Design A</p>
+      <h2 class="part-h">What we build</h2>
+      <p>One machine, one process, one Postgres. Everything in this part is planned for the take-home code and built in the order of the tables below. Items marked Could, or "if time", are built only if time is left.</p>
+    </div>
+
+    <section id="scope" aria-labelledby="h-scope">
+      <h2 id="h-scope">Scope and order</h2>
+      <p>The brief says prioritizing is part of the task, so the order follows <a href="#brief">what the brief asks</a>. Items marked Could are built only if time is left. Items marked Design B are written up in the second part of this page with enough detail to build next.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Priority</th><th>What</th><th>Why it comes here</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill must">Must</span></td><td>Page analysis: extract links with their context, score them with rules and configurable keywords, and send unclear links to an LLM</td><td>This is the objective.</td></tr>
+            <tr><td><span class="pill must">Must</span></td><td>Contacts (name, title, email, phone) and files (document type, fiscal year) as their own results</td><td>The brief names contacts and specific files.</td></tr>
+            <tr><td><span class="pill must">Must</span></td><td>Postgres schema built for volume, plus the API with OpenAPI docs</td><td>The brief asks for storage at scale and a well-built API. One page analyzed end to end is the first milestone.</td></tr>
+            <tr><td><span class="pill must">Must</span></td><td>A simple focused crawler: robots.txt, one request at a time per host, URL normalization, seen check, trap guards, best link first, depth 3, page budget</td><td>The targets on the test sites are two to four clicks from home.</td></tr>
+            <tr><td><span class="pill must">Must</span></td><td>README with setup, ranking approach and API guide</td><td>Required by the brief.</td></tr>
+            <tr><td><span class="pill should">Should</span></td><td>Live view: an event stream and a watch page</td><td>Makes a crawl easy to follow, and it is our main tool for checking each step while building.</td></tr>
+            <tr><td><span class="pill should">Should</span></td><td>Evaluation: must-find recall and precision@10 per site</td><td>Turns "it looks right" into a number that can catch regressions.</td></tr>
+            <tr><td><span class="pill could">Could</span></td><td>Browser render for script-built pages, the text layer of vague PDF links</td><td>Until then, script-built pages are flagged <code>needs_browser</code>. JSON embedded in the page is read without a browser.</td></tr>
+            <tr><td><span class="pill design">Design B</span></td><td>Distributed frontier, worker pools, object store, Bloom filter, recrawl scheduler, embeddings and hybrid search, search index, OCR, distilled classifier</td><td>Matters at millions of pages a day, and adds little to a demo on four sites.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="build" aria-labelledby="h-build">
+      <h2 id="h-build">Build steps</h2>
+      <p>Each step is small and ends with a check that we run and read before moving on. Steps 0 to 12 are built; what each check printed is in <code>docs/build-log.md</code> in the repository.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Step</th><th>What we build</th><th>How we verify it</th></tr></thead>
+          <tbody>
+            <tr><td class="num">0</td><td>Must-find list for the four sites, and the test set</td><td>Every link in "What we look for" and "Test set" behaves the way the table says.</td></tr>
+            <tr><td class="num">1</td><td>Project skeleton: docker compose, Postgres, migrations</td><td><code>docker compose up</code>, then <code>\dt</code> lists every table.</td></tr>
+            <tr><td class="num">2</td><td>Fetch one URL politely: robots.txt per RFC 9309, timeouts, size cap, redirects, status handling</td><td>Unit tests built from the RFC's examples pass. A CLI prints the robots decision, status, final URL, size and time for each test site's home page. Bozeman shows as blocked.</td></tr>
+            <tr><td class="num">3</td><td>Extract links with anchor, heading and nearby text</td><td>On Ann Arbor's Financial Reporting page, "Fiscal Year 2025" comes out with the heading "Annual Comprehensive Financial Report (ACFR)".</td></tr>
+            <tr><td class="num">4</td><td>Rules scoring with configurable keywords</td><td>On the same page, the ACFR and budget links score at least 0.7, and "Poverty Exemptions" scores low.</td></tr>
+            <tr><td class="num">5</td><td>Contacts and file details</td><td>Ann Arbor's finance page gives Marti Praschan, Chief Financial Officer, mpraschan@a2gov.org. Boerne gives Wesley Scott with "CPA, RTSBA" kept out of the name. ASU gives Morgan R. Olsen with the title and no email. The FY2025 ACFR link is tagged <code>acfr</code>, 2025.</td></tr>
+            <tr><td class="num">6</td><td>LLM tier for unclear links and contact names</td><td>The same pages before and after: more links decided correctly, every answer passes schema validation, and the run prints its cost.</td></tr>
+            <tr><td class="num">7</td><td>Storage: batched upserts, sightings, indexes</td><td>One SQL query returns each ACFR with the page and heading it was found under. Analyzing the same page twice adds no duplicate rows. Two crawls with different keywords keep separate scores.</td></tr>
+            <tr><td class="num">8</td><td>API with OpenAPI docs. First end-to-end milestone.</td><td><code>POST /v1/crawls</code> with <code>max_depth: 0</code> on Ann Arbor's Financial Reporting page, then <code>GET /v1/links?min_score=0.7</code> returns the ACFRs and budgets, and <code>/docs</code> renders.</td></tr>
+            <tr><td class="num">9</td><td>Simple focused crawler: frontier queue walked best-first by one process, crawl scope with file hosts, trap guards, depth and page budget</td><td>A crawl from a2gov.org's home page reaches Financial Reporting and finds the ACFR and the CFO. A crawl from asu.edu's home page reaches cfo.asu.edu/financial-reports without a browser. The log shows at most one request at a time to each host.</td></tr>
+            <tr><td class="num">10</td><td>Live view: events, stream, watch page</td><td>During an a2gov.org crawl, <code>/live/{id}</code> shows each page as it is fetched. A refresh keeps the history, and the final counters match the database.</td></tr>
+            <tr><td class="num">11</td><td>Evaluation script</td><td>Prints must-find recall and precision@10 for each site.</td></tr>
+            <tr><td class="num">12</td><td>README</td><td>A fresh clone runs end to end by following it.</td></tr>
+            <tr><td class="num">13</td><td>If time: browser render, N workers, PDF text layer</td><td>The crawl reaches ASU's finance hub and the ClearGov budget, and the same evaluation runs before and after.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="testset" aria-labelledby="h-testset">
+      <h2 id="h-testset">Test set</h2>
+      <p>Seventeen real cases, each one a problem the crawler has to handle. Every case was checked with a plain request on November 7, 2026. Cases marked 13 are handled only if time is left; until then the crawler flags them and moves on. Each case gets a saved snapshot of the HTML or headers, so tests run offline and give the same result every time. Before submitting, we also run one live check per case by hand.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Case</th><th>Example</th><th>What a plain request returned</th><th>What the crawler must do</th><th>Step</th></tr></thead>
+          <tbody>
+            <tr><td>Plain HTML hub</td><td><a href="https://www.a2gov.org/finance-and-administrative-services/financial-reporting/">Ann Arbor Financial Reporting</a></td><td>200, with every target link in the HTML</td><td>The baseline: extract and rank, then find the hub from the home page</td><td class="num">3–4, 9</td></tr>
+            <tr><td>Contact block</td><td><a href="https://www.boerneisd.net/411496_2">Boerne Business &amp; Financial Services</a>; <a href="https://www.a2gov.org/finance-and-administrative-services/">Ann Arbor Finance</a></td><td>Name with credentials, title and email in one block of text</td><td>Pull out name, title and email as separate fields, keep credentials out of the name, and check that each value appears in the page text</td><td class="num">5–6</td></tr>
+            <tr><td>Contact without an email</td><td><a href="https://cfo.asu.edu/">cfo.asu.edu</a></td><td>Morgan R. Olsen, Executive Vice President, Treasurer and CFO. No email or phone on the page.</td><td>Find the contact by the title, and store it with the email left empty</td><td class="num">5–6</td></tr>
+            <tr><td>Files on another host</td><td>Ann Arbor → govstack CDN; Boerne → ParentSquare file host</td><td>The PDFs are on a different domain from the page</td><td>Include file hosts linked from the entity's pages in the crawl scope</td><td class="num">9</td></tr>
+            <tr><td>Anchor is only a year</td><td>Ann Arbor "Fiscal Year 2025"</td><td>The meaning is in the heading above the link</td><td>Score the anchor and the heading together</td><td class="num">3–4</td></tr>
+            <tr><td>Redirects across hosts</td><td><a href="https://www.boerneisd.net/411496_2">Boerne /411496_2</a></td><td>Redirects to /244573_3. Financial Transparency is on boerneisd.smartsiteshost.com.</td><td>Follow redirects, store the final URL, and scope by registrable domain</td><td class="num">2, 9</td></tr>
+            <tr><td>Navigation built by JavaScript</td><td><a href="https://www.asu.edu/">asu.edu</a></td><td>The menu is not in the raw HTML. One footer link, "Jobs", goes to cfo.asu.edu.</td><td>Reach the finance hub from the home page without a browser: score the <code>cfo</code> subdomain, then follow Business and Finance → Financial Reports. Flag thin pages <code>needs_browser</code> for sites that have no such way in.</td><td class="num">4, 9</td></tr>
+            <tr><td>JavaScript app viewer</td><td><a href="https://city-ann-arbor-mi-cleardoc.cleargov.com/23859/930791/d">ClearGov FY2027 budget</a></td><td>36 KB of HTML, 20 characters of visible text and no links. It is an Angular app, and slow.</td><td>Record the link as a budget from its anchor and heading, even though there is no PDF. Render and wait for the content if time allows.</td><td class="num">4, 13</td></tr>
+            <tr><td>Share link that needs a cookie</td><td><a href="https://azregents.sharepoint.com/:b:/s/ABORPublic/Committee/Board/IQDqzHYxINVCRIodPTa5Q03nAY1bAil0wGE2sT3teJ6TJn0">ASU FY2027 budget on SharePoint</a></td><td>Without cookies, a redirect to a login page. With a cookie jar, a 12.6 MB PDF.</td><td>Keep cookies for the length of a crawl, and derive the direct file path from the <code>id</code> parameter</td><td class="num">2, 13</td></tr>
+            <tr><td>Document inside a document</td><td>The same SharePoint file</td><td>The FY2027 budget is agenda item 4.9 of a board book</td><td>Search the text for the target and store the page number</td><td>B</td></tr>
+            <tr><td>Scanned PDF</td><td><a href="https://media-001-us.cdn.govstack.com/a2gov-002-us/media/qydmrwkd/cityincometaxstudy.pdf">Ann Arbor 2009 Income Tax Study</a>; <a href="https://files.smartsites.parentsquare.com/13370/2019-2020_is_mo_tax_rate_resolution_-_signed_9-16-19.pdf">Boerne signed tax rate resolution 2019–20</a></td><td>No text at all in the first three pages</td><td>Flag <code>needs_ocr</code> and keep the link-level score. OCR runs in Design B.</td><td class="num">13</td></tr>
+            <tr><td>Draft linked as final</td><td><a href="https://www.boerneisd.net/82157_4">Boerne FY2023 annual financial report</a></td><td>The file name ends in <code>_draft</code></td><td>Penalize drafts, and prefer the final for the same year</td><td class="num">4</td></tr>
+            <tr><td>Wrong file behind a link</td><td><a href="https://cfo.asu.edu/financial-reports">ASU "2020" ACFR link</a></td><td>It opens the 2025 file</td><td>Read the year inside the document. The content hash shows that two links share one file.</td><td class="num">13</td></tr>
+            <tr><td>Opaque URL</td><td><a href="https://www.leawood.org/DocumentCenter/View/2087">leawood.org/DocumentCenter/View/2087</a></td><td>A 301 to <code>/View/2087/Finance-Director</code></td><td>Resolve it with a HEAD request and score the readable path</td><td class="num">2, 4</td></tr>
+            <tr><td>Spreadsheet</td><td><a href="https://www.boerneisd.net/82153_4">Boerne 2026–27 budget, .xlsx</a></td><td>An Excel file next to the PDF</td><td>Treat .xlsx as a document type</td><td class="num">4</td></tr>
+            <tr><td>Blocked by bot protection</td><td><a href="https://bozeman.net/">bozeman.net</a></td><td>Akamai returns 403 to every automated request, even for <code>robots.txt</code> (rechecked November 8)</td><td>Mark the crawl blocked and report it. Never disguise the crawler.</td><td class="num">2</td></tr>
+            <tr><td>Platform with an API</td><td><a href="https://webapi.legistar.com/v1/a2gov/events">Legistar for Ann Arbor</a></td><td>Public JSON with agenda PDF links, and no key needed</td><td>A connector instead of crawling</td><td>B</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="stack" aria-labelledby="h-stack">
+      <h2 id="h-stack">Stack</h2>
+      <p>TypeScript end to end on Node 22, matching Pursuit's stack. Read it top to bottom: a request enters at the interface and works down to storage.</p>
+      <ol class="layers">
+        <li class="layer">
+          <div class="layer-name"><span class="layer-k">Interface</span><span class="layer-role">Takes requests, validates them, documents itself, streams progress</span></div>
+          <div class="chips"><span class="chip">Fastify</span><span class="chip">@fastify/swagger · OpenAPI</span><span class="chip">Zod</span><span class="chip">Server-Sent Events</span><span class="chip">Watch page · plain HTML</span></div>
+        </li>
+        <li class="layer">
+          <div class="layer-name"><span class="layer-k">Crawler</span><span class="layer-role">Fetches pages politely and pulls out links with context</span></div>
+          <div class="chips"><span class="chip">undici</span><span class="chip">robots-parser</span><span class="chip">cheerio</span><span class="chip plain">Playwright · if time</span></div>
+        </li>
+        <li class="layer">
+          <div class="layer-name"><span class="layer-k">Ranking and extraction</span><span class="layer-role">Scores every link and pulls out contacts, cheapest tier first</span></div>
+          <div class="chips"><span class="chip">Rules in TypeScript</span><span class="chip cost">Small LLM · JSON schema</span><span class="chip plain">Ollama · local option</span></div>
+        </li>
+        <li class="layer">
+          <div class="layer-name"><span class="layer-k">Documents</span><span class="layer-role">Reads the text layer behind vague PDF links</span></div>
+          <div class="chips"><span class="chip plain">pdfjs-dist · if time</span></div>
+        </li>
+        <li class="layer">
+          <div class="layer-name"><span class="layer-k">Data</span><span class="layer-role">Links, sightings, contacts, crawl events and full-text search</span></div>
+          <div class="chips"><span class="chip">Postgres 16</span><span class="chip">pg driver + SQL migrations</span></div>
+        </li>
+        <li class="layer base">
+          <div class="layer-name"><span class="layer-k">Runtime and tooling</span><span class="layer-role">Runs everything with one command, and tests it</span></div>
+          <div class="chips"><span class="chip">Node 22</span><span class="chip">TypeScript</span><span class="chip">docker compose</span><span class="chip">Vitest</span><span class="chip">pino logs</span></div>
+        </li>
+      </ol>
+      <p class="pre-label">Design B adds</p>
+      <div class="chips"><span class="chip plain">Kafka or SQS</span><span class="chip plain">Redis</span><span class="chip plain">S3</span><span class="chip plain">Embeddings · pgvector</span><span class="chip plain">OpenSearch</span><span class="chip plain">OCR</span><span class="chip plain">Browser worker pool</span></div>
+    </section>
+
+    <section id="hard" aria-labelledby="h-hard">
+      <h2 id="h-hard">Hard problems</h2>
+      <p>The six questions any crawler design has to answer, with the answer in Design A (A) and in Design B (B). Each card links to the detail.</p>
+      <div class="hard">
+        <div class="tile">
+          <h4>Loops and traps</h4>
+          <dl class="ab">
+            <dt>A</dt><dd>Seen set of normalized URL hashes, canonical links, content hashes, at most five redirects with a cycle check, depth 3, 500 pages per host, calendar and repeating-path guards.</dd>
+            <dt class="b">B</dt><dd>Same rules. The seen set moves to a Bloom filter in Redis.</dd>
+          </dl>
+          <a class="more" href="#traps">Trap guards</a>
+        </div>
+        <div class="tile">
+          <h4>The site's rules</h4>
+          <dl class="ab">
+            <dt>A</dt><dd><code>robots.txt</code> per host (Disallow, Crawl-delay), meta robots and <code>X-Robots-Tag</code> nofollow, one request at a time per host and at least a second apart, an honest User-Agent, <code>Retry-After</code> on 429 and 503. Blocked sites are reported, never bypassed.</dd>
+            <dt class="b">B</dt><dd>Same rules, enforced by the worker that owns the host's partition.</dd>
+          </dl>
+          <a class="more" href="#politeness">Politeness</a>
+        </div>
+        <div class="tile">
+          <h4>Sites built with JavaScript</h4>
+          <dl class="ab">
+            <dt>A</dt><dd>Plain HTML first, then the sitemap. A page whose HTML looks empty is flagged <code>needs_browser</code> and reported. If time allows, Playwright renders flagged pages.</dd>
+            <dt class="b">B</dt><dd>A separate browser worker pool, so slow renders never hold up plain fetches.</dd>
+          </dl>
+          <a class="more" href="#fetch">Fetching</a>
+        </div>
+        <div class="tile">
+          <h4>Queues and workers</h4>
+          <dl class="ab">
+            <dt>A</dt><dd>The frontier queue is a Postgres table, so a stopped crawl resumes where it left off. One process runs a few async workers (3 by default) that claim the best URL whose site is free with <code>SKIP LOCKED</code>, so more processes need no rewrite.</dd>
+            <dt class="b">B</dt><dd>Kafka or SQS partitioned by host, with separate pools for fetch, render, parse and rank, and OCR.</dd>
+          </dl>
+          <a class="more" href="#workers">Queues and workers</a>
+        </div>
+        <div class="tile">
+          <h4>Scanned PDFs</h4>
+          <dl class="ab">
+            <dt>A</dt><dd>PDFs are ranked by their link, not their content. If time allows, read the text layer of vague PDF links. A PDF with no text layer is a scan: it is flagged <code>needs_ocr</code> and keeps its link-level score.</dd>
+            <dt class="b">B</dt><dd>OCR workers process flagged files that already score high, then chunk and index them.</dd>
+          </dl>
+          <a class="more" href="#documents">Vague document links</a>
+        </div>
+        <div class="tile">
+          <h4>Where the LLM runs</h4>
+          <dl class="ab">
+            <dt>A</dt><dd>Never on whole pages or whole sites. Only on short link records (anchor, URL, heading, about 200 characters of context) that are still unsure after the rules, 50 per call, and on the small text block around an email to read the name and title.</dd>
+            <dt class="b">B</dt><dd>Same, and a small classifier trained on the LLM's labels takes most of that load.</dd>
+          </dl>
+          <a class="more" href="#ranking">Link ranking</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="crawl" aria-labelledby="h-crawl">
+      <h2 id="h-crawl">Architecture</h2>
+      <p>Design A runs on one machine: one Node process runs the API and the crawler, next to one Postgres. The diagram uses the same grid as the Design B diagram, so the two can be compared box by box. Dashed boxes are later steps or Design B. Fetching and extraction are separate steps with the raw page saved in between, so pages can be re-ranked and tested without crawling again. The blue loop is what makes it a focused crawler.</p>
+
+      <figure>
+        <div class="dg wide">
+          <svg viewBox="0 0 1010 470" role="img" aria-label="Design A architecture, on the same grid as Design B. Clients call the API, which sends seed URLs through the seen check into the frontier queue, a table in Postgres. The fetcher takes the next URL from the frontier queue and writes raw pages to local disk. Extract and rank reads each new page, pulls out links, contacts and files, sends only unclear items to OpenAI, upserts results into Postgres, and sends new links with a path score through the seen check back into the frontier queue. The API serves lookups from Postgres and streams live events to the live view. A browser render is a later step, and the scheduler, document pipeline and search index are Design B only.">
+            <defs>
+              <marker id="da-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
+              <marker id="da-ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk accent" d="M0 0 L10 5 L0 10 z"/></marker>
+              <marker id="da-mc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk cost" d="M0 0 L10 5 L0 10 z"/></marker>
+            </defs>
+
+            <!-- later step or Design B only (dashed) -->
+            <rect class="box ghost" x="430" y="20" width="150" height="60" rx="6"/>
+            <text class="t ghost" x="505" y="46" text-anchor="middle">Browser (Playwright)</text>
+            <text class="s ghost" x="505" y="64" text-anchor="middle">if time · flag for now</text>
+            <rect class="box ghost" x="10" y="130" width="150" height="60" rx="6"/>
+            <text class="t ghost" x="85" y="156" text-anchor="middle">Scheduler</text>
+            <text class="s ghost" x="85" y="174" text-anchor="middle">Design B only</text>
+            <rect class="box ghost" x="850" y="20" width="150" height="60" rx="6"/>
+            <text class="t ghost" x="925" y="46" text-anchor="middle">Document pipeline</text>
+            <text class="s ghost" x="925" y="64" text-anchor="middle">Design B only</text>
+            <rect class="box ghost" x="850" y="370" width="150" height="60" rx="6"/>
+            <text class="t ghost" x="925" y="396" text-anchor="middle">Search index</text>
+            <text class="s ghost" x="925" y="414" text-anchor="middle">Design B only</text>
+
+            <!-- row 2 -->
+            <rect class="box" x="220" y="130" width="150" height="60" rx="6"/>
+            <text class="t" x="295" y="156" text-anchor="middle">Frontier queue</text>
+            <text class="s" x="295" y="174" text-anchor="middle">a table in Postgres</text>
+
+            <rect class="box" x="430" y="130" width="150" height="60" rx="6"/>
+            <text class="t" x="505" y="156" text-anchor="middle">Fetcher</text>
+            <text class="s" x="505" y="174" text-anchor="middle">robots · 1 req per host</text>
+
+            <rect class="box" x="640" y="130" width="150" height="60" rx="6"/>
+            <text class="t" x="715" y="156" text-anchor="middle">Raw pages</text>
+            <text class="s" x="715" y="174" text-anchor="middle">local disk, gzip</text>
+
+            <!-- row 3 -->
+            <rect class="box" x="220" y="250" width="150" height="60" rx="6"/>
+            <text class="t" x="295" y="276" text-anchor="middle">Seen check</text>
+            <text class="s" x="295" y="294" text-anchor="middle">Postgres unique key</text>
+
+            <rect class="box accent" x="640" y="250" width="150" height="60" rx="6"/>
+            <text class="t" x="715" y="276" text-anchor="middle">Extract + rank</text>
+            <text class="s" x="715" y="294" text-anchor="middle">links · contacts · files</text>
+
+            <rect class="box cost" x="850" y="250" width="150" height="60" rx="6"/>
+            <text class="t" x="925" y="276" text-anchor="middle">OpenAI</text>
+            <text class="s" x="925" y="294" text-anchor="middle">unclear items only</text>
+
+            <!-- row 4 -->
+            <rect class="box" x="220" y="370" width="150" height="60" rx="6"/>
+            <text class="t" x="295" y="396" text-anchor="middle">Live view</text>
+            <text class="s" x="295" y="414" text-anchor="middle">watch page · SSE</text>
+
+            <rect class="box" x="430" y="370" width="150" height="60" rx="6"/>
+            <text class="t" x="505" y="396" text-anchor="middle">API (Fastify)</text>
+            <text class="s" x="505" y="414" text-anchor="middle">crawls · links · contacts</text>
+
+            <rect class="box" x="640" y="370" width="150" height="60" rx="6"/>
+            <text class="t" x="715" y="396" text-anchor="middle">Postgres</text>
+            <text class="s" x="715" y="414" text-anchor="middle">results · events · FTS</text>
+
+            <!-- flows -->
+            <path class="ln" d="M370 160 H428" marker-end="url(#da-m)"/>
+            <text class="lbl" x="399" y="152" text-anchor="middle">next URL</text>
+            <path class="ln ghost" d="M505 84 V128" marker-start="url(#da-m)" marker-end="url(#da-m)"/>
+            <text class="lbl ghost" x="513" y="110">render</text>
+            <path class="ln" d="M580 160 H638" marker-end="url(#da-m)"/>
+            <text class="lbl" x="609" y="152" text-anchor="middle">raw bytes</text>
+            <path class="ln" d="M715 190 V248" marker-end="url(#da-m)"/>
+            <text class="lbl" x="723" y="224">new page</text>
+            <path class="ln cost" d="M790 280 H848" marker-end="url(#da-mc)"/>
+            <text class="lbl cost" x="819" y="272" text-anchor="middle">unclear</text>
+            <path class="ln accent" d="M640 280 H372" marker-end="url(#da-ma)"/>
+            <text class="lbl accent" x="505" y="272" text-anchor="middle">new links + path score</text>
+            <path class="ln accent" d="M295 250 V192" marker-end="url(#da-ma)"/>
+            <text class="lbl accent" x="303" y="226">unseen only</text>
+            <path class="ln" d="M715 310 V368" marker-end="url(#da-m)"/>
+            <text class="lbl" x="723" y="344">upsert</text>
+            <path class="ln" d="M580 400 H638" marker-end="url(#da-m)"/>
+            <text class="lbl" x="609" y="392" text-anchor="middle">lookups</text>
+            <path class="ln" d="M470 370 V340 H295 V312" marker-end="url(#da-m)"/>
+            <text class="lbl" x="382" y="334" text-anchor="middle">seed URL</text>
+            <path class="ln" d="M430 400 H372" marker-end="url(#da-m)"/>
+            <text class="lbl" x="401" y="392" text-anchor="middle">events</text>
+            <path class="ln" d="M505 466 V432" marker-end="url(#da-m)"/>
+            <text class="lbl" x="513" y="456">clients</text>
+          </svg>
+        </div>
+        <figcaption>In Design A the frontier queue, the seen check, the results and the crawl events are all tables in one Postgres, and raw pages sit on local disk. The crawler runs in the API process, so events reach the live view straight from memory. Amber marks the paid calls. Dashed boxes are later steps or Design B.</figcaption>
+      </figure>
+
+      <h3 id="politeness">Politeness</h3>
+      <ul class="list">
+        <li>Fetch and cache <code>robots.txt</code> per host for 24 hours. Honor <code>Disallow</code> and <code>Crawl-delay</code>. Per RFC 9309, a 4xx for <code>robots.txt</code> means everything is allowed, and a 5xx or no answer means nothing is.</li>
+        <li>One request at a time per site, at least one second apart, longer when the site answers slowly. A site is a registrable domain: on the first real crawl, three asu.edu subdomains fetched in parallel shared one rate limit and answered 429. A 429 or 503 doubles a per-site backoff, up to a minute; success halves it.</li>
+        <li>Send an honest User-Agent that names the bot and links to a page describing it.</li>
+        <li>Honor <code>&lt;meta name="robots" content="nofollow"&gt;</code> and the <code>X-Robots-Tag</code> header. Links on those pages are not followed.</li>
+        <li>On 429 or 503, wait for <code>Retry-After</code>. After repeated 403 or 5xx responses, pause the host and mark the crawl as blocked.</li>
+      </ul>
+
+      <h3>URL normalization and dedupe</h3>
+      <p>Every URL is normalized before it is hashed into the seen set: lowercase scheme and host, default port removed, fragment removed, tracking parameters (<code>utm_*</code>, <code>fbclid</code>, <code>gclid</code>) and session IDs stripped, query parameters sorted, relative paths resolved. After a redirect, the final URL is stored too. When a page declares a <code>rel="canonical"</code> URL on the same host, that URL replaces it. A SHA-256 of the response body catches the same page served under different URLs.</p>
+
+      <h3 id="scope-rules">Crawl scope</h3>
+      <p>The crawler never wanders the open web. It stays on the entity's own site.</p>
+      <ul class="list">
+        <li><strong>In scope:</strong> the seed's registrable domain and all its subdomains. A crawl that starts at asu.edu covers cfo.asu.edu.</li>
+        <li><strong>A link to another domain</strong> is stored and ranked, but not crawled. A budget PDF on a CDN or a school file host becomes a result; the host itself is not explored, and social networks never are.</li>
+        <li><strong>One exception:</strong> when an in-scope link redirects to another host, as Boerne's does to boerneisd.smartsiteshost.com, that host joins the scope of this crawl only.</li>
+        <li><strong>Limits:</strong> depth 3 and a page budget per crawl. Low-scoring links wait at the back of the queue and are reached only if budget is left.</li>
+        <li><strong>Visible:</strong> every URL left out is recorded with the reason, such as "out of scope", so the live view shows at once if a crawl starts to drift.</li>
+      </ul>
+
+      <h3 id="traps">Trap guards</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Trap</th><th>Looks like</th><th>Guard</th></tr></thead>
+          <tbody>
+            <tr><td>Endless calendar</td><td><code>/calendar?month=2031-04</code></td><td>Drop date parameters more than 12 months from today. Cap pages per path pattern.</td></tr>
+            <tr><td>Session IDs</td><td><code>;jsessionid=…</code>, <code>?sid=…</code></td><td>Strip during normalization.</td></tr>
+            <tr><td>Parameter permutations</td><td><code>?a=1&amp;b=2</code> and <code>?b=2&amp;a=1</code></td><td>Sort parameters. Skip URLs with more than five.</td></tr>
+            <tr><td>Repeating paths</td><td><code>/a/b/a/b/a/b</code></td><td>Reject a path where a segment repeats three or more times.</td></tr>
+            <tr><td>Very large site</td><td>A university with tens of thousands of pages</td><td>Per-host page budget (default 500) and max depth 3.</td></tr>
+            <tr><td>Same page, new URL</td><td>Print views, mirrors</td><td>Content hash. Do not re-extract a body already seen.</td></tr>
+            <tr><td>Redirect loop</td><td><code>/a → /b → /a</code></td><td>At most five redirects. Stop when a URL repeats in the chain.</td></tr>
+            <tr><td>Huge files</td><td>A 200 MB scanned PDF</td><td>Read <code>Content-Length</code> first and apply a size cap.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="workers">Queues and workers</h3>
+      <p>The frontier queue is a table in Postgres, so a crawl survives a restart and the live view can show what is waiting. A few async workers in one process claim the best URL whose site is free, fetch it, extract and rank, and write the results. <code>SKIP LOCKED</code> lets any number of workers or processes share the queue without taking the same URL or hitting the same site at once. No host may use more than 30% of the page budget.</p>
+      <p class="pre-label">Claim the next URL</p>
+<pre><code>with next as (
+  select f.crawl_id, f.url_hash
+  from frontier f
+  join hosts h on h.host = f.host
+  join sites s on s.site = h.site      -- registrable domain
+  where f.status = 'queued'
+    and f.not_before      &lt;= now()
+    and s.next_allowed_at &lt;= now()
+  order by f.path_score desc
+  limit 1
+  for update of f, s skip locked
+)
+update frontier f
+set status = 'fetching', attempts = attempts + 1
+from next
+where f.crawl_id = next.crawl_id and f.url_hash = next.url_hash
+returning f.url, f.host;
+-- same transaction: lease the site until the fetch is done
+-- after the fetch: next_allowed_at = now() + max(delay, response time, backoff)</code></pre>
+      <ul class="list">
+        <li><strong>Retries only when a retry can help:</strong> timeouts, network errors, 5xx and 429. A 4xx such as 404 or 403 is final: the page is marked <code>failed</code> with its status and is not tried again. A retry goes back to <code>queued</code> with <code>not_before</code> pushed out by exponential backoff with jitter, or by <code>Retry-After</code> when the server sends it. After three attempts it becomes <code>failed</code>.</li>
+        <li><strong>Crash safety:</strong> a URL stuck in <code>fetching</code> for more than five minutes returns to the queue.</li>
+        <li><strong>Host breaker:</strong> after five errors in a row the host is paused, and the crawl status says so.</li>
+      </ul>
+    </section>
+
+    <section id="fetch" aria-labelledby="h-fetch">
+      <h2 id="h-fetch">Fetching</h2>
+      <p>Each host climbs a ladder from cheap to expensive and stops at the first step that returns usable links. The crawler remembers per host which step worked.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Step</th><th>When</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td>1. Plain HTML</td><td>Always first. JSON embedded in the page (menus and cards that scripts draw) is read too: that is how ASU's CFO is found.</td><td>One request.</td></tr>
+            <tr><td>2. Sitemap</td><td>When <code>robots.txt</code> lists one, or <code>/sitemap.xml</code> exists. Gives a list of pages without running anything.</td><td>One or a few requests.</td></tr>
+            <tr><td>3. Headless browser</td><td>Only when the HTML looks empty: few links, an empty app root, or navigation built by script. Built if time allows. Until then the page is flagged <code>needs_browser</code> and reported.</td><td><span class="pill cost">Expensive</span> An order of magnitude more CPU and time.</td></tr>
+            <tr><td>4. Mark blocked</td><td>When the site still refuses automated clients.</td><td>Reported in crawl status and in the README.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>What the test sites returned (checked November 6, 2026)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Site</th><th>Observed</th><th>Plan</th></tr></thead>
+          <tbody>
+            <tr><td>a2gov.org</td><td>Plain HTML, 105 links on the home page. <code>robots.txt</code> lists a sitemap.</td><td>HTML plus sitemap.</td></tr>
+            <tr><td>boerneisd.net</td><td>Plain HTML, 218 links on the home page, two of them direct PDF links.</td><td>HTML.</td></tr>
+            <tr><td>asu.edu</td><td>Main navigation is built by JavaScript. The raw HTML has 42 links. No sitemap line in <code>robots.txt</code>.</td><td>The plain HTML still has a way in: the footer link "Jobs" goes to cfo.asu.edu/applicant, which links to Business and Finance and then Financial Reports. Three clicks, no browser. The <code>cfo</code> in the host name is what makes the crawler pick it. Strict page budget, since the site is very large.</td></tr>
+            <tr><td>bozeman.net</td><td>Leads to bozemanmt.gov, where Akamai returns 403 "Access Denied" to a script client. The same page opens normally in a browser.</td><td>Mark it blocked and report it in the crawl status and the README. No fingerprint spoofing.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Bot protection is a real constraint at Pursuit's scale. The right long-term answer is an identified bot that sites can allow, or another source for the same documents, such as the third-party platforms where many entities publish agendas and budgets.</p>
+    </section>
+
+    <section id="ranking" aria-labelledby="h-ranking">
+      <h2 id="h-ranking">Link ranking</h2>
+      <p>Every link gets two scores, because a link can be valuable in two different ways.</p>
+      <div class="grid2">
+        <div class="tile">
+          <p class="k">Target score</p>
+          <h4>Is this link a result?</h4>
+          <p>A budget book, an ACFR, a finance contact page. The API sorts by this score.</p>
+          <p class="ex">"FY2026 Adopted Budget (PDF)" → target 0.95</p>
+        </div>
+        <div class="tile">
+          <p class="k">Path score</p>
+          <h4>Does this link lead to results?</h4>
+          <p>A Departments menu or a Finance landing page. The frontier orders by this score.</p>
+          <p class="ex">"Departments" → target 0.05, path 0.60</p>
+        </div>
+      </div>
+
+      <figure>
+        <div class="dg">
+          <svg viewBox="0 0 900 226" role="img" aria-label="Ranking cascade. Every extracted link goes to tier 1, rules. Links scoring at least 0.7 or at most 0.2 are decided there. In the first version, links between 0.2 and 0.7 go straight to tier 3, a batched LLM call, which always decides. Tier 2, embeddings, is a later step that would sit between them. Every decision is stored with its scores, reason and deciding tier.">
+            <defs>
+              <marker id="d2-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
+              <marker id="d2-mc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk cost" d="M0 0 L10 5 L0 10 z"/></marker>
+            </defs>
+            <rect class="box accent" x="200" y="12" width="690" height="44" rx="6"/>
+            <text class="t" x="545" y="39" text-anchor="middle">Decided → stored with target score, path score, reason and deciding tier</text>
+
+            <rect class="box" x="10" y="150" width="150" height="62" rx="6"/>
+            <text class="t" x="85" y="176" text-anchor="middle">Extracted links</text>
+            <text class="s" x="85" y="195" text-anchor="middle">anchor · URL · context</text>
+
+            <rect class="box" x="200" y="150" width="180" height="62" rx="6"/>
+            <text class="t" x="290" y="176" text-anchor="middle">1 · Rules</text>
+            <text class="s" x="290" y="195" text-anchor="middle">free · runs on every link</text>
+
+            <rect class="box ghost" x="455" y="150" width="180" height="62" rx="6"/>
+            <text class="t ghost" x="545" y="176" text-anchor="middle">2 · Embeddings</text>
+            <text class="s ghost" x="545" y="195" text-anchor="middle">later step · skipped for now</text>
+
+            <rect class="box cost" x="710" y="150" width="180" height="62" rx="6"/>
+            <text class="t" x="800" y="176" text-anchor="middle">3 · LLM</text>
+            <text class="s" x="800" y="195" text-anchor="middle">batched · JSON schema</text>
+
+            <path class="ln" d="M160 181 H198" marker-end="url(#d2-m)"/>
+            <path class="ln" d="M380 181 H453" marker-end="url(#d2-m)"/>
+            <text class="lbl" x="417" y="173" text-anchor="middle">0.2 – 0.7</text>
+            <path class="ln cost" d="M635 181 H708" marker-end="url(#d2-mc)"/>
+            <text class="lbl cost" x="671" y="173" text-anchor="middle">unsure</text>
+
+            <path class="ln" d="M290 150 V58" marker-end="url(#d2-m)"/>
+            <text class="lbl" x="298" y="108">≥ 0.7 or ≤ 0.2</text>
+            <path class="ln ghost" d="M545 150 V58" marker-end="url(#d2-m)"/>
+            <text class="lbl ghost" x="553" y="108">similarity is clear</text>
+            <path class="ln cost" d="M800 150 V58" marker-end="url(#d2-mc)"/>
+            <text class="lbl cost" x="808" y="108">always decides</text>
+          </svg>
+        </div>
+        <figcaption>Each link stops at the cheapest tier that can decide it. In the first version the dashed tier is skipped and unclear links go straight from the rules to the LLM. The 0.7 and 0.2 thresholds are starting values, tuned on the labeled set.</figcaption>
+      </figure>
+
+      <h3>Tier 1: rule signals</h3>
+      <p>The score is a weighted sum, clipped to 0–1, stored with the list of signals that fired. These are starting weights, calibrated against the labeled set.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Signal</th><th>Example</th><th>Start weight</th></tr></thead>
+          <tbody>
+            <tr><td>Keyword in anchor text</td><td>"FY2026 Adopted Budget"</td><td class="num">+0.35</td></tr>
+            <tr><td>Keyword in the URL: subdomain, path or filename</td><td><code>cfo.asu.edu</code>, <code>/finance/acfr-2025.pdf</code></td><td class="num">+0.25</td></tr>
+            <tr><td>Document file type</td><td>.pdf, .xlsx</td><td class="num">+0.15</td></tr>
+            <tr><td>Keyword in section heading or nearby text</td><td>Link sits under "Financial Reports"</td><td class="num">+0.15</td></tr>
+            <tr><td>Parent page path score</td><td>Found on the Finance page</td><td class="num">+0.10</td></tr>
+            <tr><td>Fiscal year recency</td><td>FY2026 ranks above FY2014</td><td class="num">× 0.6–1.0</td></tr>
+            <tr><td>Site-wide boilerplate</td><td>Same link in the nav or footer of every page</td><td class="num">−0.20</td></tr>
+            <tr><td>Known noise</td><td>Social, login, calendar, news</td><td class="num">−0.40</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="keywords">Configurable keywords</h3>
+      <p>Each crawl takes its own keyword set. Synonyms matter in public finance: the ACFR was called the CAFR until 2021, and the person you want might be titled Treasurer or Comptroller.</p>
+      <p class="pre-label">POST /v1/crawls body (excerpt)</p>
+<pre><code>{
+  "url": "https://www.a2gov.org/",
+  "max_depth": 3,
+  "page_budget": 500,
+  "keywords": {
+    "acfr":             { "weight": 1.0, "synonyms": ["cafr", "annual comprehensive financial report",
+                                                       "comprehensive annual financial report"] },
+    "budget":           { "weight": 1.0, "synonyms": ["adopted budget", "proposed budget", "budget book",
+                                                       "capital improvement plan"] },
+    "finance director": { "weight": 0.8, "synonyms": ["chief financial officer", "cfo", "treasurer",
+                                                       "comptroller", "finance manager"] }
+  }
+}</code></pre>
+
+      <h3>The LLM tier, and embeddings later</h3>
+      <ul class="list">
+        <li><strong>LLM:</strong> it never sees a whole page or a whole site. It sees short link records (anchor, URL, heading, about 200 characters of nearby text) for links the rules left between 0.2 and 0.7, in batches of about 50, with a strict JSON schema: type, target score, path score, a short reason. The code validates every answer and keeps the rules score if the call fails. The product never depends on the model behaving.</li>
+        <li><strong>Cache:</strong> every LLM answer is stored under a hash of the model, the prompt version and the input. A rerun on the same pages pays nothing and gives the same result, and tests run offline on the stored answers.</li>
+        <li><strong>No key, no LLM:</strong> without an API key the LLM tier is skipped. Unsure links keep their rules score, and contacts come from simple patterns such as "Name, Title". The whole system runs end to end without paid services.</li>
+        <li><strong>Embeddings, later:</strong> cosine similarity between the link's anchor plus context and each target concept would catch paraphrases that no keyword list covers, and take load off the LLM. It is the first thing to add once the evaluation shows where the rules miss.</li>
+      </ul>
+
+      <h3 id="documents">Vague document links · if time</h3>
+      <p>A link that says only "View" or "Document 1234" gives the rules nothing to work with. For PDF links with a promising path score, the crawler downloads the file (under the size cap) and reads the text layer of the first two pages. The LLM then returns the document type and fiscal year. Most budget books and ACFRs are generated digitally and already have a text layer. A PDF with no text layer is a scan. It is flagged <code>needs_ocr</code> and keeps its link-level score. In Design B, OCR workers process flagged files that already score high.</p>
+    </section>
+
+    <section id="contacts" aria-labelledby="h-contacts">
+      <h2 id="h-contacts">Contacts and files</h2>
+      <p>The brief asks for "relevant contacts and specific files", so both come out as results of their own, not only as links. The finance contact is a person: a name, a title, an email and a phone. A file is a document with a type and a year.</p>
+
+      <h3>Contacts</h3>
+      <ul class="list">
+        <li><strong>Find:</strong> rules pick up every <code>mailto:</code> and <code>tel:</code> link, every email or phone number in the page text, and every place where a title from the keywords appears, such as Chief Financial Officer or Finance Director. Titles matter because some contacts have no email on the page: ASU lists its CFO by name and title only. This step is free and runs on every page.</li>
+        <li><strong>Read:</strong> for each email or title found, the LLM gets only the small block of text around it and returns name, title, email and phone in a fixed schema. A field that is not there stays empty.</li>
+        <li><strong>Verify:</strong> the code checks that every value the LLM returns appears in that block, character for character. A value that is not in the page is dropped, so the model cannot invent a contact.</li>
+        <li><strong>Score:</strong> the title is matched against the crawl's keywords, so a Chief Financial Officer ranks above a receptionist on the same page. Contacts are unique per host and name, so the same person found on three pages is stored once.</li>
+      </ul>
+      <p class="pre-label">GET /v1/contacts?host=a2gov.org · one record, values illustrative</p>
+<pre><code>{
+  "name": "Marti Praschan",
+  "title": "Chief Financial Officer",
+  "email": "mpraschan@a2gov.org",
+  "phone": null,
+  "score": 0.93,
+  "matched_keywords": ["finance director"],
+  "source_page": "https://www.a2gov.org/finance-and-administrative-services/",
+  "source_snippet": "Marti Praschan, Chief Financial Officer … mpraschan@a2gov.org"
+}</code></pre>
+
+      <h3>Files</h3>
+      <ul class="list">
+        <li><strong>Document type</strong> (<code>acfr</code>, <code>budget</code>, <code>single_audit</code>, …) from the anchor, the heading above the link and the file name, using the keyword synonyms. The LLM decides when these disagree.</li>
+        <li><strong>Fiscal year</strong> from patterns such as "FY2026", "2025-26", "Fiscal Year 2025" and "June 30, 2025", in the anchor first, then the file name, then the heading.</li>
+        <li><strong>File type</strong> from the extension or the <code>Content-Type</code> of a HEAD request: PDF, Excel, or an HTML page such as the ClearGov budget viewer.</li>
+        <li><strong>Draft</strong> when the name or anchor says draft or proposed. A draft ranks below the final for the same year.</li>
+      </ul>
+    </section>
+
+    <section id="data" aria-labelledby="h-data">
+      <h2 id="h-data">Data model</h2>
+      <p>The key split is between a link and its sightings. The same budget PDF can be linked from the Finance page, the Council page and a news post. It is stored once in <code>links</code> and three times in <code>sightings</code>, so there are no duplicates and every source is kept.</p>
+      <ul class="list">
+        <li><strong>Scores belong to a crawl.</strong> Keywords are set per crawl, so the same link can matter for one keyword set and not for another. <code>links</code> holds the facts about a URL, and <code>link_scores</code> holds each crawl's scores. Because pages are saved, a new keyword set can be scored against saved pages without fetching again.</li>
+        <li><strong>Idempotent writes:</strong> every table has a natural unique key (URL hash; crawl and link; crawl, host and name; link, page and crawl), so every write is an upsert. Analyzing a page twice, or retrying after a crash, never creates duplicates.</li>
+        <li><strong>Batched writes:</strong> all links found on a page go in one statement, not one row at a time.</li>
+        <li><strong>Indexes match the API's filters,</strong> and pagination uses keys, never OFFSET, so reads stay fast at millions of rows.</li>
+        <li><strong>Raw bytes stay out of the database.</strong> Pages are gzip files on disk, keyed by URL hash.</li>
+      </ul>
+<pre><code>create table crawls (
+  id            uuid primary key,
+  seed_url      text not null,
+  keywords      jsonb not null,
+  status        text not null,          -- queued | running | done | blocked | failed
+  pages_fetched int  not null default 0,
+  started_at    timestamptz,
+  finished_at   timestamptz
+);
+
+create table hosts (
+  host               text primary key,
+  robots_txt         text,
+  robots_fetched_at  timestamptz,
+  crawl_delay_ms     int not null default 1000,
+  next_allowed_at    timestamptz not null default now(),
+  fetch_method       text,              -- html | sitemap | browser | blocked
+  consecutive_errors int not null default 0
+);
+
+create table frontier (                 -- the crawl queue
+  crawl_id    uuid  references crawls,
+  url_hash    bytea not null,
+  url         text  not null,
+  host        text  not null references hosts,
+  depth       int   not null,
+  path_score  real  not null,
+  status      text  not null default 'queued',  -- queued | fetching | done | failed | skipped
+  attempts    int   not null default 0,
+  not_before  timestamptz not null default now(),
+  primary key (crawl_id, url_hash)
+);
+
+create table pages (
+  id            bigserial primary key,
+  url_hash      bytea unique not null,  -- sha256(normalized url)
+  url           text not null,
+  final_url     text,                   -- after redirects
+  host          text not null,
+  http_status   int,
+  content_type  text,
+  content_hash  bytea,                  -- sha256(body): same page, new URL
+  fetch_method  text,                   -- html | sitemap | browser | blocked
+  etag          text,
+  last_modified text,
+  fetched_at    timestamptz
+);
+
+create table links (                    -- facts about a URL, the same in every crawl
+  id               bigserial primary key,
+  url_hash         bytea unique not null,
+  url              text not null,
+  host             text not null,
+  label            text,                -- best anchor text seen
+  type             text not null,       -- document | page
+  file_type        text,                -- pdf | xlsx | html
+  fiscal_year      int,
+  is_draft         boolean not null default false,
+  needs_browser    boolean not null default false,
+  needs_ocr        boolean not null default false,
+  search           tsvector generated always as
+                     (to_tsvector('simple', coalesce(label, '') || ' ' || url)) stored,
+  first_seen       timestamptz,
+  last_seen        timestamptz
+);
+
+create table link_scores (              -- depends on the crawl's keywords
+  crawl_id         uuid   references crawls,
+  link_id          bigint references links,
+  doc_type         text,                -- keyword group matched: acfr | budget | finance director | ...
+  target_score     real not null,
+  path_score       real not null,
+  matched_keywords text[],
+  reason           text,
+  decided_by       text not null,       -- rules | llm
+  ranker_version   text not null,       -- which rules and prompt produced the score
+  primary key (crawl_id, link_id)
+);
+
+create table sightings (                -- every place a link was found
+  link_id         bigint references links,
+  source_page_id  bigint references pages,
+  crawl_id        uuid   references crawls,
+  anchor_text     text,
+  section_heading text,
+  context_snippet text,
+  depth           int,
+  found_at        timestamptz,
+  primary key (link_id, source_page_id, crawl_id)
+);
+
+create table contacts (                 -- few rows, so each crawl keeps its own
+  id               bigserial primary key,
+  crawl_id         uuid not null references crawls,
+  host             text not null,
+  name             text not null,
+  title            text,
+  email            text,                -- empty when the page shows none
+  phone            text,
+  score            real,
+  matched_keywords text[],
+  source_page_id   bigint references pages,
+  source_snippet   text,                -- the text every field was checked against
+  unique (crawl_id, name)              -- one person per crawl, whatever host named them
+);
+
+create table llm_cache (                -- reruns and tests never pay twice
+  key              bytea primary key,   -- sha256(model + prompt version + input)
+  model            text not null,
+  prompt_version   text not null,
+  response         jsonb not null,
+  created_at       timestamptz not null default now()
+);
+
+create table crawl_events (             -- feeds the live view and its history
+  id        bigserial primary key,
+  crawl_id  uuid not null references crawls,
+  type      text not null,              -- page.fetched | page.skipped | link.found | contact.found | crawl.done
+  data      jsonb not null,
+  at        timestamptz not null default now()
+);
+
+create index on frontier (crawl_id, status, path_score desc);
+create index on link_scores (crawl_id, target_score desc, link_id);
+create index on link_scores (crawl_id, doc_type);
+create index on links (host);
+create index on links using gin (search);
+create index on contacts (crawl_id, score desc);
+create index on crawl_events (crawl_id, id);</code></pre>
+
+      <h3>Search</h3>
+      <p>The <code>q</code> parameter runs Postgres full-text search over each link's label and URL, which is enough for exact terms such as ACFR, FY2025 or a person's name. Search by meaning, with vectors merged with the keyword results, is a Design B step (see <a href="#content">Search inside documents</a>).</p>
+    </section>
+
+    <section id="api" aria-labelledby="h-api">
+      <h2 id="h-api">API</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>POST</code></td><td><code>/v1/crawls</code></td><td>Start a crawl with a seed URL, keyword weights, max depth and page budget. <code>max_depth: 0</code> analyzes a single page. Returns 202 with a crawl ID. Accepts an <code>Idempotency-Key</code> header.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}</code></td><td>Status (queued, running, done, blocked, failed) and counters.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}/events</code></td><td>Live stream of the crawl's events (Server-Sent Events). See <a href="#live">Live view</a>.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}/pages</code></td><td>Pages by status: queued, fetching, done, failed, skipped, each with the reason.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/links</code></td><td>Scores belong to a crawl, so pass <code>crawl_id</code>, or <code>host</code> to read that host's latest crawl. Filter by <code>type</code>, <code>doc_type</code>, <code>fiscal_year</code>, <code>min_score</code>, <code>keyword</code>. <code>q</code> runs full-text search. Cursor pagination.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/links/{id}</code></td><td>One link with every sighting.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/contacts</code></td><td>Contacts by host, title or minimum score, each with its source page and snippet.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/live/{id}</code></td><td>The watch page for a crawl.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/docs</code></td><td>OpenAPI spec and interactive docs.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="list">
+        <li><strong>Crawls run in the background.</strong> The API answers 202 at once and never blocks on crawling. A client follows progress through the status endpoint or the live stream.</li>
+        <li><strong>Keyset pagination</strong> on <code>(target_score, id)</code>. It stays stable while new links arrive and never scans with OFFSET.</li>
+        <li><strong>One source for validation and docs.</strong> Zod schemas validate requests and generate the OpenAPI spec, so the docs cannot drift from the code.</li>
+        <li><strong>One error shape</strong> everywhere, with a machine-readable code and the parameter at fault.</li>
+        <li><strong>Design B:</strong> API keys and per-key rate limits.</li>
+      </ul>
+      <p class="pre-label">Example response · placeholder domain</p>
+<pre><code>GET /v1/links?host=city.example.gov&amp;type=document&amp;min_score=0.7&amp;limit=1
+
+{
+  "data": [
+    {
+      "id": 902,
+      "url": "https://city.example.gov/finance/fy2026-adopted-budget.pdf",
+      "type": "document",
+      "doc_type": "budget",
+      "fiscal_year": 2026,
+      "target_score": 0.94,
+      "matched_keywords": ["budget", "adopted budget"],
+      "decided_by": "rules",
+      "reason": "keyword in anchor and filename; PDF; under heading 'Budget Documents'",
+      "sources": [
+        {
+          "page": "https://city.example.gov/finance",
+          "anchor_text": "FY2026 Adopted Budget (PDF)",
+          "section_heading": "Budget Documents",
+          "found_at": "2026-11-08T14:02:11Z"
+        }
+      ]
+    }
+  ],
+  "next_cursor": "eyJzIjowLjk0LCJpZCI6OTAyfQ"
+}
+
+400 Bad Request
+{ "error": { "code": "invalid_parameter", "param": "min_score",
+             "message": "min_score must be between 0 and 1" } }</code></pre>
+    </section>
+
+    <section id="live" aria-labelledby="h-live">
+      <h2 id="h-live">Live view</h2>
+      <p>A crawl can run for minutes, so it should be easy to watch while it runs. The same view is our main tool for checking each build step: we see what the crawler does and why, instead of reading logs after the fact.</p>
+      <p class="pre-label">GET /live/{id} · sketch</p>
+<pre><code>┌ Crawl a2gov.org ──────────────────────── running · 2m 14s ┐
+│ Now    /departments/finance/        depth 2 · path 0.80   │
+│ Pages  46 done · 120 queued · 3 failed · 12 skipped       │
+│ Found  9 documents · 2 contacts · LLM 14 calls · $0.01    │
+├ Live ─────────────────────────────────────────────────────┤
+│ 200  412 ms  /departments/finance/            87 links    │
+│ skip         /calendar/2031-01                trap        │
+│ skip         /admin/                          robots.txt  │
+│ ★ ACFR 0.95  …/city-of-ann-arbor-6-30-25-acfr-final.pdf   │
+│ ★ CFO  0.93  Marti Praschan                               │
+└───────────────────────────────────────────────────────────┘</code></pre>
+      <ul class="list">
+        <li><strong>What it shows:</strong> the page being fetched now with its depth and score, counters (done, queued, failed, skipped), documents and contacts found, LLM calls and cost, a feed of every page with status, time and link count, every skipped page with the reason (robots.txt, already seen, out of scope, trap, budget), and the best results so far.</li>
+        <li><strong>How it works:</strong> at each step the crawler emits an event. The event is written to <code>crawl_events</code>, pushed to every open stream, and announced on a Postgres <code>NOTIFY</code> channel, so a crawl started from the command line shows up live in the API's watch page. The watch page first loads the current state from <code>GET /v1/crawls/{id}</code>, then listens, so a refresh keeps the history.</li>
+        <li><strong>Why Server-Sent Events:</strong> data flows one way, from server to viewer. It is a plain HTTP response, the browser reconnects on its own and resumes from the last event ID, and it can be tested with <code>curl</code>. A WebSocket would add a two-way channel nobody uses.</li>
+        <li><strong>The watch page</strong> is one static HTML file with a few lines of script. No front-end build.</li>
+      </ul>
+      <p class="pre-label">GET /v1/crawls/{id}/events</p>
+<pre><code>id: 4312
+event: page.fetched
+data: {"url":"https://www.a2gov.org/departments/finance/","status":200,"ms":412,"links":87,"depth":2}
+
+id: 4313
+event: link.found
+data: {"url":"…/city-of-ann-arbor-6-30-25-acfr-final.pdf","type":"document","doc_type":"acfr","fiscal_year":2025,"score":0.95}
+
+id: 4314
+event: page.skipped
+data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></pre>
+    </section>
+
+    <section id="eval" aria-labelledby="h-eval">
+      <h2 id="h-eval">Evaluation</h2>
+      <p>Ranking quality is measured, not eyeballed.</p>
+      <ul class="list">
+        <li><strong>Must-find list:</strong> for each site, the latest budget, the latest ACFR and the finance contact with the right title and email. Recall on this list is the headline number.</li>
+        <li><strong>Labeled set:</strong> about 50 hand-labeled links per reachable test site, each marked relevant or not, with its type.</li>
+        <li><strong>Precision@10</strong> per site and per type.</li>
+        <li><strong>Cost per tier:</strong> the share of links decided by rules and by the LLM, and LLM tokens per 1,000 pages.</li>
+        <li><strong>Runs in CI.</strong> A change to weights, thresholds or prompts that lowers precision fails the build.</li>
+      </ul>
+    </section>
+
+    <section id="readme" aria-labelledby="h-readme">
+      <h2 id="h-readme">README</h2>
+      <p>The brief asks for documentation with three parts. The README in the repository is the deliverable; this page is the design behind it.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>What it contains</th></tr></thead>
+          <tbody>
+            <tr><td>Setup</td><td>One command to start everything (<code>docker compose up</code>), an optional environment variable for the LLM key (without it everything runs on rules alone), and one command that crawls the four test sites.</td></tr>
+            <tr><td>Prioritization approach</td><td>The rule signals and their weights, how keywords and synonyms are set per crawl, when the LLM runs and what it sees, how contacts are verified, and one real link traced from anchor to final score.</td></tr>
+            <tr><td>API usage</td><td>Every endpoint with a <code>curl</code> request and a real response, plus how to open the live view.</td></tr>
+            <tr><td>Results and limits</td><td>What was found on each test site, the evaluation numbers, and what is not handled yet: Bozeman is blocked, script-built pages are flagged, scans are not read.</td></tr>
+            <tr><td>At scale</td><td>A short summary of Design B, with a link to the full write-up.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="part" id="design-b">
+      <p class="part-k">Design B</p>
+      <h2 class="part-h">The ambitious version</h2>
+      <p>What this becomes at Pursuit's scale: millions of pages a day across every public entity, two stores, and search by meaning inside the documents. None of this part is built in the take-home.</p>
+    </div>
+
+    <section id="compare" aria-labelledby="h-compare">
+      <h2 id="h-compare">A vs B</h2>
+      <p>The stages stay the same. Each row shows what changes.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Design A · we build</th><th>Design B · ambitious</th></tr></thead>
+          <tbody>
+            <tr><td>Frontier</td><td>Postgres table, walked best-first by one process. N workers with SKIP LOCKED if time allows.</td><td>Kafka or SQS, partitioned by host hash, fed by a recrawl scheduler</td></tr>
+            <tr><td>Seen set</td><td>Postgres unique key on the URL hash</td><td>Bloom filter in Redis, with the Postgres key as the final word</td></tr>
+            <tr><td>Fetching</td><td>One request at a time per host, with a delay. Script-built pages are flagged.</td><td>Stateless fetcher pool plus a separate browser pool</td></tr>
+            <tr><td>Raw pages</td><td>Gzip files on local disk, keyed by URL hash</td><td>Object store keyed by content hash</td></tr>
+            <tr><td>Ranking</td><td>Rules → LLM</td><td>Rules → embeddings → LLM, plus a small classifier trained on the LLM's labels</td></tr>
+            <tr><td>Contacts</td><td>Rules find emails and phones, the LLM reads name and title, the code checks both against the page</td><td>Same, plus matching the same person across sites and noticing when someone leaves</td></tr>
+            <tr><td>Documents</td><td>Ranked by their link. If time allows, the text layer of vague PDF links.</td><td>Full text, OCR for scans, chunked and embedded</td></tr>
+            <tr><td>Storage</td><td>One Postgres</td><td>Postgres as source of truth, plus a search index fed by CDC</td></tr>
+            <tr><td>Search</td><td>Full-text search over links, inside Postgres</td><td>Hybrid search (keywords plus vectors) over links and document chunks, with a reranker</td></tr>
+            <tr><td>Progress</td><td>Live view: event stream and a watch page per crawl</td><td>Metrics and dashboards per host, tier and crawl</td></tr>
+            <tr><td>Freshness</td><td>Crawl on request</td><td>Recrawl by change rate, with conditional requests</td></tr>
+            <tr><td>Operations</td><td>docker compose and structured logs</td><td>Dead-letter queue, circuit breakers, LLM cost tracking</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="scale" aria-labelledby="h-scale">
+      <h2 id="h-scale">Architecture</h2>
+      <p>The same stages as the crawl loop, split into independent pools that scale on their own and talk through queues.</p>
+
+      <figure>
+        <div class="dg wide">
+          <svg viewBox="0 0 1060 470" role="img" aria-label="Design B architecture. A scheduler puts due URLs on a frontier queue partitioned by host. A fetcher pool takes the next URL, sends JavaScript-heavy hosts to a browser pool, and writes raw bytes to an object store. A document pipeline turns stored PDFs into text, OCR output, chunks and vectors for the search index. Parse and rank workers read new pages, send unsure links to the LLM API, write results to Postgres, and send new links through a Bloom-filter seen set back to the frontier. Postgres feeds the search index through change data capture. The API reads Postgres for lookups and the search index for search.">
+            <defs>
+              <marker id="d3-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
+              <marker id="d3-ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk accent" d="M0 0 L10 5 L0 10 z"/></marker>
+              <marker id="d3-mc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk cost" d="M0 0 L10 5 L0 10 z"/></marker>
+            </defs>
+
+            <!-- row 1 -->
+            <rect class="box cost" x="430" y="20" width="150" height="60" rx="6"/>
+            <text class="t" x="505" y="46" text-anchor="middle">Browser pool</text>
+            <text class="s" x="505" y="64" text-anchor="middle">only JS-heavy hosts</text>
+
+            <!-- row 2 -->
+            <rect class="box" x="10" y="130" width="150" height="60" rx="6"/>
+            <text class="t" x="85" y="156" text-anchor="middle">Scheduler</text>
+            <text class="s" x="85" y="174" text-anchor="middle">recrawl by change rate</text>
+
+            <rect class="box" x="220" y="130" width="150" height="60" rx="6"/>
+            <text class="t" x="295" y="156" text-anchor="middle">Frontier queue</text>
+            <text class="s" x="295" y="174" text-anchor="middle">partitioned by host</text>
+
+            <rect class="box" x="430" y="130" width="150" height="60" rx="6"/>
+            <text class="t" x="505" y="156" text-anchor="middle">Fetcher pool</text>
+            <text class="s" x="505" y="174" text-anchor="middle">robots · per-host limit</text>
+
+            <rect class="box" x="640" y="130" width="150" height="60" rx="6"/>
+            <text class="t" x="715" y="156" text-anchor="middle">Object store</text>
+            <text class="s" x="715" y="174" text-anchor="middle">raw pages by hash</text>
+
+            <!-- row 3 -->
+            <rect class="box" x="220" y="250" width="150" height="60" rx="6"/>
+            <text class="t" x="295" y="276" text-anchor="middle">Seen set</text>
+            <text class="s" x="295" y="294" text-anchor="middle">Bloom filter in Redis</text>
+
+            <rect class="box accent" x="640" y="250" width="150" height="60" rx="6"/>
+            <text class="t" x="715" y="276" text-anchor="middle">Parse + rank</text>
+            <text class="s" x="715" y="294" text-anchor="middle">rules → vectors → LLM</text>
+
+            <rect class="box cost" x="850" y="250" width="150" height="60" rx="6"/>
+            <text class="t" x="925" y="276" text-anchor="middle">LLM API</text>
+            <text class="s" x="925" y="294" text-anchor="middle">batched · cached</text>
+
+            <!-- row 4 -->
+            <rect class="box" x="430" y="370" width="150" height="60" rx="6"/>
+            <text class="t" x="505" y="396" text-anchor="middle">API</text>
+            <text class="s" x="505" y="414" text-anchor="middle">filters · search</text>
+
+            <rect class="box" x="640" y="370" width="150" height="60" rx="6"/>
+            <text class="t" x="715" y="396" text-anchor="middle">Postgres</text>
+            <text class="s" x="715" y="414" text-anchor="middle">source of truth</text>
+
+            <rect class="box" x="850" y="370" width="150" height="60" rx="6"/>
+            <text class="t" x="925" y="396" text-anchor="middle">Search index</text>
+            <text class="s" x="925" y="414" text-anchor="middle">BM25 + vectors</text>
+
+            <!-- flows -->
+            <path class="ln" d="M160 160 H218" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="189" y="152" text-anchor="middle">due URLs</text>
+            <path class="ln" d="M370 160 H428" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="399" y="152" text-anchor="middle">next URL</text>
+            <path class="ln cost" d="M505 84 V128" marker-start="url(#d3-mc)" marker-end="url(#d3-mc)"/>
+            <text class="lbl cost" x="513" y="110">render</text>
+            <path class="ln" d="M580 160 H638" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="609" y="152" text-anchor="middle">raw bytes</text>
+            <path class="ln" d="M715 190 V248" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="723" y="224">new page</text>
+            <path class="ln cost" d="M790 280 H848" marker-end="url(#d3-mc)"/>
+            <text class="lbl cost" x="819" y="272" text-anchor="middle">unsure</text>
+            <path class="ln accent" d="M640 280 H372" marker-end="url(#d3-ma)"/>
+            <text class="lbl accent" x="505" y="272" text-anchor="middle">new links + path score</text>
+            <path class="ln accent" d="M295 250 V192" marker-end="url(#d3-ma)"/>
+            <text class="lbl accent" x="303" y="226">unseen only</text>
+            <path class="ln" d="M715 310 V368" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="723" y="344">upsert</text>
+            <path class="ln" d="M790 400 H848" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="819" y="392" text-anchor="middle">CDC</text>
+            <path class="ln" d="M580 400 H638" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="609" y="392" text-anchor="middle">lookups</text>
+            <path class="ln" d="M505 430 V452 H925 V432" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="715" y="446" text-anchor="middle">search queries</text>
+            <path class="ln" d="M362 400 H428" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="354" y="404" text-anchor="end">clients</text>
+
+            <!-- document pipeline (Design B only) -->
+            <rect class="box" x="850" y="20" width="150" height="60" rx="6"/>
+            <text class="t" x="925" y="46" text-anchor="middle">Document pipeline</text>
+            <text class="s" x="925" y="64" text-anchor="middle">OCR · chunks · vectors</text>
+            <path class="ln" d="M790 150 H925 V82" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="857" y="142" text-anchor="middle">PDFs</text>
+            <path class="ln" d="M1000 50 H1040 V400 H1002" marker-end="url(#d3-m)"/>
+            <text class="lbl" x="1020" y="42" text-anchor="middle">chunks</text>
+          </svg>
+        </div>
+        <figcaption>Hosts are partitioned so one fetcher owns each host, which keeps politeness a local decision. Postgres stays the source of truth for links and contacts. The search index holds link records and document chunks, and can be rebuilt from Postgres and the object store at any time.</figcaption>
+      </figure>
+
+      <h3 id="content">Search inside documents</h3>
+      <p>Design A ranks links. Design B also reads what the documents say, because that is where buying signals live: a line item for body-worn cameras in a budget, or a council vote on a new permitting system.</p>
+      <ul class="list">
+        <li><strong>Extract:</strong> the text layer for digital PDFs, OCR only for scans. Keep page numbers and table structure.</li>
+        <li><strong>Chunk:</strong> split by section and table, about 500–800 tokens each. Every chunk keeps its document ID, page number and character offsets.</li>
+        <li><strong>Index:</strong> each chunk goes into the search index with both keyword terms and a vector.</li>
+        <li><strong>Search:</strong> hybrid retrieval merged with Reciprocal Rank Fusion, then a reranker on the top 50. Every hit links back to the exact page and offset it came from.</li>
+        <li><strong>Why a second store here:</strong> millions of documents at a few hundred chunks each means hundreds of millions of chunks. Search over that needs to scale apart from the transactional database. Postgres keeps the records, and the index is a derived copy that can be rebuilt.</li>
+      </ul>
+
+      <h3 id="numbers">Back-of-envelope</h3>
+      <p>The brief asks about millions of pages a day. These numbers tie that to Pursuit's coverage. Rows marked as assumptions are the ones to check first.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Quantity</th><th>Estimate</th><th>Basis</th></tr></thead>
+          <tbody>
+            <tr><td>Entities</td><td class="num">~170,000</td><td>Pursuit's public coverage figure</td></tr>
+            <tr><td>Pages per entity per pass</td><td class="num">~200</td><td>Focused crawl with a page budget (assumption)</td></tr>
+            <tr><td>Pages per full pass</td><td class="num">~34M</td><td>170,000 × 200</td></tr>
+            <tr><td>Pages per day</td><td class="num">~1.1M (≈13/s)</td><td>Monthly refresh, faster for pages that change (assumption)</td></tr>
+            <tr><td>Raw HTML per day</td><td class="num">~110 GB</td><td>~100 KB a page. Test home pages were 70–290 KB. Roughly 20–30 GB compressed.</td></tr>
+            <tr><td>Link sightings per day</td><td class="num">~100M</td><td>~100 links a page. Test home pages had 42–218.</td></tr>
+            <tr><td>New unique links to rank</td><td class="num">~5–10M</td><td>Most sightings repeat nav and footer links (assumption)</td></tr>
+            <tr><td>Links reaching the LLM</td><td class="num">~1%</td><td>Target after rules and embeddings, checked on the labeled set</td></tr>
+            <tr><td>LLM calls per day</td><td class="num">~1,000–2,000</td><td>50–100k links in batches of 50</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>At 3 million pages a day the same design runs at about 35 pages a second. Only the worker counts change.</p>
+
+      <h3 id="pressure">Where it gets hard</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Pressure</th><th>Answer</th></tr></thead>
+          <tbody>
+            <tr><td>Per-host politeness limits big sites, not total throughput</td><td>Partition the frontier by host hash and crawl thousands of hosts in parallel. Each host stays at its own pace.</td></tr>
+            <tr><td>Browser rendering is slow and expensive</td><td>A separate pool, used only for hosts flagged as script-built. Remember per host which fetch method worked.</td></tr>
+            <tr><td>LLM cost grows with links</td><td>The cascade, caching by URL and content hash, and batching. Later, train a small classifier on the LLM's labels and keep the LLM for the hardest cases.</td></tr>
+            <tr><td>Refetching unchanged pages</td><td>Conditional requests with <code>ETag</code> and <code>If-Modified-Since</code>. The scheduler visits pages that change often more frequently.</td></tr>
+            <tr><td>Seen set outgrows memory</td><td>A Bloom filter in Redis for the fast check, with the <code>url_hash</code> unique key in Postgres as the final word.</td></tr>
+            <tr><td>Failures at volume</td><td>Retries with exponential backoff and jitter, a dead-letter queue, and a per-host circuit breaker. Writes are idempotent upserts keyed by URL hash.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>When to split storage</h3>
+      <ul class="list">
+        <li><strong>Start:</strong> one Postgres for relational data, full-text search and vectors. Raw bytes go to an object store keyed by content hash and never sit in the database.</li>
+        <li><strong>Partition:</strong> split <code>links</code> and <code>sightings</code> by host hash once they pass about 100M rows.</li>
+        <li><strong>Add a search index:</strong> when vectors pass about 100M or search load needs to scale on its own. Feed it from Postgres through an outbox or CDC, so it can always be rebuilt.</li>
+      </ul>
+    </section>
+
+    <section id="decisions" aria-labelledby="h-decisions">
+      <h2 id="h-decisions">Decisions</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Decision</th><th>Reason</th><th>Cost accepted</th></tr></thead>
+          <tbody>
+            <tr><td>Page analysis first, crawler second</td><td>The objective is ranking the links on a page and pulling out contacts and files. The crawler only feeds it pages.</td><td>Results across a whole site arrive later in the build.</td></tr>
+            <tr><td>One process before many workers</td><td>Four sites at one request at a time per host do not need parallel workers. The queue table and claim query are already the ones workers would use.</td><td>A crawl of the four sites takes minutes, not seconds.</td></tr>
+            <tr><td>Scores stored per crawl</td><td>Keywords are set per crawl, so a score only means something next to the keywords that produced it.</td><td>More rows, and reading a link's score needs a join.</td></tr>
+            <tr><td>Contacts checked against the page text</td><td>An LLM can produce a plausible email that is not on the page. Only values found in the page are stored.</td><td>Contacts shown as images or behind forms are missed.</td></tr>
+            <tr><td>Focused crawl with a page budget</td><td>Pursuit needs a few high-value documents per entity, not a full copy of every site.</td><td>Might miss a target buried under an unpromising path. The labeled set measures this.</td></tr>
+            <tr><td>Rules first, LLM last</td><td>Cost, speed and repeatable results. Every decision records which tier made it.</td><td>Rules need tuning per keyword set.</td></tr>
+            <tr><td>One database to start</td><td>No dual writes to keep in sync. Filters and full-text search run in one query.</td><td>Search and storage scale together until the split trigger is reached.</td></tr>
+            <tr><td>Store every sighting</td><td>Customers trust a result they can trace. Debugging a bad score starts from its source.</td><td>More rows. Cheap compared with the value.</td></tr>
+            <tr><td>Respect bot protection</td><td>Spoofing a browser fingerprint is evasion, and it puts the company's reputation at risk.</td><td>Some sites stay blocked until there is an allow-list or another source.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="questions" aria-labelledby="h-questions">
+      <h2 id="h-questions">Open questions</h2>
+      <p>Answers to these would change the design, so they are worth asking before going further.</p>
+      <ul class="list">
+        <li>Is there already a list of entity websites to seed from, or known finance pages per entity?</li>
+        <li>Which targets matter most to customers: documents, contacts, or both equally?</li>
+        <li>How fresh does the data need to be? Days or weeks changes the recrawl budget a lot.</li>
+        <li>Are third-party agenda and document platforms in scope, or only the entity's own domain?</li>
+        <li>Bozeman's site blocks every automated request at the network edge, even for <code>robots.txt</code>. Is reporting the block the expected result for that test site?</li>
+      </ul>
+    </section>
+  </main>
+</div>
+
+</html>

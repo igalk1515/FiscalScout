@@ -33,7 +33,7 @@ const HONORIFIC = /^(dr|mr|mrs|ms|miss|prof|hon)\.?\s+/i;
 const TITLE_WORDS =
   /^(executive|vice|president|chief|director|officer|treasurer|manager|controller|comptroller|assistant|deputy|senior|associate|superintendent|coordinator|specialist|analyst|accountant|supervisor|head|dean|provost|cfo|ceo|coo|cio|business|finance|financial|budget|interim|acting|administrator|clerk)$/i;
 const NOT_NAME_WORDS =
-  /^(department|office|services?|city|county|district|school|university|finance|financial|contact|us|email|phone|fax|address|street|suite|hours|monday|tuesday|wednesday|thursday|friday|the|and|of|for|staff|directory|board|team|division|information|welcome|learn|more|view|leadership|careers|jobs)$/i;
+  /^(department|office|services?|city|county|district|school|university|college|institute|center|centre|foundation|enterprise|learning|research|park|hall|building|campus|program|programs|chart|org|organization|plan|report|reports|budget|finance|financial|contact|us|email|phone|fax|address|street|suite|hours|monday|tuesday|wednesday|thursday|friday|the|and|of|for|staff|directory|board|team|division|information|welcome|learn|more|view|leadership|careers|jobs|online|news|about|home|page)$/i;
 
 /** A person's name: two to four capitalized words, initials allowed, after honorifics and credentials are removed. */
 export function cleanName(raw: string): string | null {
@@ -47,6 +47,7 @@ export function cleanName(raw: string): string | null {
   for (const t of tokens) {
     if (!/^([A-Z][a-zA-Z'’-]+|[A-Z]\.)$/.test(t)) return null;
     if (TITLE_WORDS.test(t) || NOT_NAME_WORDS.test(t)) return null;
+    if (/^[A-Z]{2,}$/.test(t)) return null; // an acronym ("ASU"), not part of a name
   }
   if (/^[A-Z]\.$/.test(tokens[tokens.length - 1]!)) return null; // ends with an initial
   return tokens.join(" ");
@@ -182,6 +183,20 @@ function candidateBlocks($: CheerioAPI, groups: CompiledGroup[]): string[] {
 }
 
 /**
+ * A title fit to show: without the person's name, without "is the" from a sentence, cut at the
+ * end of the sentence, at most 100 characters.
+ */
+export function cleanTitle(raw: string, name: string): string | null {
+  let t = cleanText(raw.replace(/&nbsp;/gi, " ").replace(name, ""));
+  t = t.replace(/^[,;:\-\s]+/, "").replace(/^(is|was|serves as|as)\s+(the\s+|our\s+|a\s+)?/i, "");
+  const end = t.search(/\.\s|\.$/);
+  if (end > 0) t = t.slice(0, end);
+  t = t.trim();
+  if (!t) return null;
+  return t.length > 100 ? `${t.slice(0, 99).trim()}…` : t;
+}
+
+/**
  * Email and phone for one person in a block: an email whose address contains the person's
  * name wins; otherwise the nearest email and phone in the lines after the name, and only when
  * the block names a single person.
@@ -242,7 +257,7 @@ export async function findContacts($: CheerioAPI, dataBlocks: string[], ctx: Con
       people = parsed.map((p) => ({ ...p, ...nearestReach(block, p.name, parsed.length), by: "rules" as const }));
     }
     for (const p of people) {
-      if (p.title) p.title = cleanText(p.title.replace(p.name, "")).replace(/^[,;:\-\s]+/, "") || null;
+      if (p.title) p.title = cleanTitle(p.title, p.name);
       const m = p.title ? titleMatch(groups, p.title) : titleMatch(groups, block);
       if (!m) continue; // not a finance title
       const contact: Contact = {

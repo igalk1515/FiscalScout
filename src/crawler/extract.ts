@@ -198,6 +198,18 @@ export function extractPage(html: string | CheerioAPI, pageUrl: string): PageExt
 
 type DataItem = { kind: "block"; text: string } | { kind: "link"; link: LinkCandidate };
 
+/** HTML stored inside JSON keeps its entities: decode the common ones. */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+}
+
 const URL_KEYS = /^(href|url|link|path|uri|linkurl|link_url)$/i;
 const LABEL_KEYS = ["label", "title", "text", "name", "linkText", "link_text", "alt", "imageAltText", "heading"];
 const IGNORED_KEYS = /^(id|uuid|key|class|classes|style|color|size|type|target|icon|image|imagesource|src|token|hash)$/i;
@@ -226,7 +238,7 @@ function extractDataIslands($: CheerioAPI, base: string): DataItem[] {
         continue;
       }
       if (IGNORED_KEYS.test(k) || isUrlish(v)) continue;
-      const t = cleanText(v.replace(/<[^>]+>/g, " "));
+      const t = cleanText(decodeEntities(v.replace(/<[^>]+>/g, " ")));
       if (t.length < 2 || t.length > 300 || /^[a-z0-9_-]+$/.test(t)) continue; // skip enum-like values
       strings.push(t);
     }
