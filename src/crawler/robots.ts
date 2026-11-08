@@ -1,7 +1,14 @@
-import robotsParser from "robots-parser";
+import { createRequire } from "node:module";
 import { fetchUrl } from "./fetcher.js";
 
-type Robot = ReturnType<typeof robotsParser>;
+interface Robot {
+  isAllowed(url: string, ua?: string): boolean | undefined;
+  getCrawlDelay(ua?: string): number | undefined;
+  getSitemaps(): string[];
+}
+// robots-parser is CommonJS and its type file declares an ES default export, which TypeScript's
+// NodeNext mode cannot call. Loading it with require gives the real function.
+const robotsParser = createRequire(import.meta.url)("robots-parser") as (url: string, text: string) => Robot;
 
 /**
  * What robots.txt tells us for one host, following RFC 9309:

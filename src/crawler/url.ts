@@ -85,7 +85,13 @@ const SKIP_EXTENSIONS = new Set([
 
 /** File type from the URL's extension: a document type, "media" for things we never fetch, or null. */
 export function fileTypeFromUrl(url: string): string | null {
-  const path = new URL(url).pathname.toLowerCase();
+  const u = new URL(url);
+  const path = u.pathname.toLowerCase();
+  // SharePoint share links name the file type in the path: /:b:/ is a PDF, /:x:/ a spreadsheet.
+  if (u.hostname.endsWith(".sharepoint.com")) {
+    const kind = path.match(/^\/:([bxwp]):\//)?.[1];
+    if (kind) return { b: "pdf", x: "xlsx", w: "docx", p: "pptx" }[kind]!;
+  }
   const m = path.match(/\.([a-z0-9]{2,5})$/);
   if (!m) return null;
   const ext = m[1]!;
