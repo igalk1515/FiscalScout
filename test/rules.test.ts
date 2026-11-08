@@ -128,6 +128,8 @@ describe("rules scoring on the test sites", () => {
     const answers = scoreLink({ ...base, url: "https://cdn.example/260501-fy27-budget-responses.pdf", anchor: "FY27 Budget Responses" }, ctx);
     expect(answers.targetScore).toBeLessThan(book.targetScore - 0.15);
     expect(answers.reason).toMatch(/paper about the document/);
+    const rfp = scoreLink({ ...base, url: "https://cdn.example/rfp_22-78_budgetspreadsheet.xlsm", anchor: "Budget Spreadsheet" }, ctx);
+    expect(rfp.supportingPaper).toBe(true);
   });
 
   it("keywords are per crawl: with other keywords the ACFR is no longer a result", () => {

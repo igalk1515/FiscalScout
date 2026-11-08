@@ -60,7 +60,7 @@ const WEAK_HUB =
 
 /** Papers about a document rather than the document: "FY27 Budget Responses", "Budget Hearing Notice". */
 const SUPPORTING_PAPER =
-  /(?<![a-z])(responses?|questions?|q ?& ?a|faq|memos?|memorandum|presentations?|slides|hearings?|notices?|agendas?|minutes|survey|resolutions?|amendments?|transmittal|timeline|calendar|work ?sessions?|press release|public comment|workshop)(?![a-z])/i;
+  /(?<![a-z])(responses?|questions?|q ?& ?a|faq|memos?|memorandum|presentations?|slides|hearings?|notices?|agendas?|minutes|survey|resolutions?|amendments?|transmittal|timeline|calendar|work ?sessions?|press release|public comment|workshop|rfp|rfq|rfi|bids?|addend(um|a)|solicitations?)(?![a-z])/i;
 
 const round = (n: number) => Math.round(Math.max(0, Math.min(1, n)) * 1000) / 1000;
 
