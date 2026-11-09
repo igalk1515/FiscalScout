@@ -229,7 +229,7 @@ h3[id] { scroll-margin-top: 24px; }
       <p class="eyebrow">Pursuit take-home · System design</p>
       <h1>High-Value Link Scraper</h1>
       <p class="lede">A scraper that reads a public entity's web pages and ranks every link by how likely it is to lead to a budget, an annual financial report or a finance contact. It pulls out the contacts and files themselves, ranks cheaply first and with an LLM only when needed, stores every result with the page it came from, and serves the data through a small, well-shaped API that also shows a crawl live.</p>
-      <p class="meta">Igal Babushkin · Draft 3, as built · November 8, 2026 · <a href="https://github.com/igalk1515/high-value-link-scraper">github.com/igalk1515/high-value-link-scraper</a></p>
+      <p class="meta">Igal Babushkin · Draft 4, as built · November 9, 2026 · <a href="https://github.com/igalk1515/high-value-link-scraper">github.com/igalk1515/high-value-link-scraper</a></p>
     </header>
 
     <section id="summary" aria-labelledby="h-summary">
@@ -287,7 +287,7 @@ h3[id] { scroll-margin-top: 24px; }
             <tr><td class="num">3</td><td>An API to access the data, with good architecture and design</td><td>Versioned REST, crawls in the background, filters, keyset pagination, one error shape, generated OpenAPI docs, and a live event stream.</td><td><a href="#api">API</a>, <a href="#live">Live view</a></td></tr>
             <tr><td class="num">4</td><td>Store URL, type, relevance score and keywords, built for scale</td><td>One Postgres. Unique keys make every write an idempotent upsert, writes are batched per page, and indexes match the API's filters.</td><td><a href="#data">Data model</a></td></tr>
             <tr><td class="num">5</td><td>Documentation: setup, prioritization approach, API usage</td><td>A README with those three parts, plus known limits.</td><td><a href="#readme">README</a></td></tr>
-            <tr><td class="num">6</td><td>Thought about millions of pages a day, without having to build it</td><td>Design B, written up with numbers and the points where it breaks.</td><td><a href="#design-b">Design B</a></td></tr>
+            <tr><td class="num">6</td><td>Thought about millions of pages a day, without having to build it</td><td>Design B on this page, and <code>docs/scaling.md</code> in the repository, written from the numbers the test crawls measured, with the points where it breaks.</td><td><a href="#design-b">Design B</a></td></tr>
           </tbody>
         </table>
       </div>
@@ -378,12 +378,12 @@ h3[id] { scroll-margin-top: 24px; }
     <div class="part" id="design-a">
       <p class="part-k">Design A</p>
       <h2 class="part-h">What we build</h2>
-      <p>One machine, one process, one Postgres. Everything in this part is planned for the take-home code and built in the order of the tables below. Items marked Could, or "if time", are built only if time is left.</p>
+      <p>One machine, one process, one Postgres. Everything in this part is planned for the take-home code and built in the order of the tables below. Items marked Could, or "if time", were left for the last step, and each one says whether it was built.</p>
     </div>
 
     <section id="scope" aria-labelledby="h-scope">
       <h2 id="h-scope">Scope and order</h2>
-      <p>The brief says prioritizing is part of the task, so the order follows <a href="#brief">what the brief asks</a>. Items marked Could are built only if time is left. Items marked Design B are written up in the second part of this page with enough detail to build next.</p>
+      <p>The brief says prioritizing is part of the task, so the order follows <a href="#brief">what the brief asks</a>. Items marked Could were left for the last step; the row says which of them were built. Items marked Design B are written up in the second part of this page with enough detail to build next.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Priority</th><th>What</th><th>Why it comes here</th></tr></thead>
@@ -395,16 +395,24 @@ h3[id] { scroll-margin-top: 24px; }
             <tr><td><span class="pill must">Must</span></td><td>README with setup, ranking approach and API guide</td><td>Required by the brief.</td></tr>
             <tr><td><span class="pill should">Should</span></td><td>Live view: an event stream and a watch page</td><td>Makes a crawl easy to follow, and it is our main tool for checking each step while building.</td></tr>
             <tr><td><span class="pill should">Should</span></td><td>Evaluation: must-find recall and precision@10 per site</td><td>Turns "it looks right" into a number that can catch regressions.</td></tr>
-            <tr><td><span class="pill could">Could</span></td><td>Browser render for script-built pages, the text layer of vague PDF links</td><td>Until then, script-built pages are flagged <code>needs_browser</code>. JSON embedded in the page is read without a browser.</td></tr>
+            <tr><td><span class="pill could">Could</span></td><td>Browser render for script-built pages: <strong>built</strong>, off by default. A few workers in one process: <strong>built</strong>, 3 by default. The text layer of vague PDF links: <strong>not built</strong>.</td><td>Script-built pages are flagged <code>needs_browser</code>. With the render tier on, the ones on the entity's own site are opened in a headless browser. JSON embedded in the page is read without a browser.</td></tr>
             <tr><td><span class="pill design">Design B</span></td><td>Distributed frontier, worker pools, object store, Bloom filter, recrawl scheduler, embeddings and hybrid search, search index, OCR, distilled classifier</td><td>Matters at millions of pages a day, and adds little to a demo on four sites.</td></tr>
           </tbody>
         </table>
       </div>
+      <p>Added while building, because a real crawl or a re-read of the brief showed the need:</p>
+      <ul class="list">
+        <li><strong>A keyword editor and re-ranking.</strong> Keywords could first be set only in a JSON body. The start page and the results page now edit them, and a finished crawl is ranked again from its saved pages, without fetching.</li>
+        <li><strong>A results page with search</strong> over documents and contacts.</li>
+        <li><strong>Stopping a crawl</strong>, from the API or a Stop button on the watch page.</li>
+        <li><strong>A discount for documents on another government's site.</strong> ASU's finance site links the State of Arizona's budget summaries, which ranked above ASU's own budget.</li>
+        <li><strong>An LLM switch per crawl</strong>, to run on rules alone.</li>
+      </ul>
     </section>
 
     <section id="build" aria-labelledby="h-build">
       <h2 id="h-build">Build steps</h2>
-      <p>Each step is small and ends with a check that we run and read before moving on. Steps 0 to 12 are built; what each check printed is in <code>docs/build-log.md</code> in the repository.</p>
+      <p>Each step is small and ends with a check that we run and read before moving on. Steps 0 to 12 are built, and step 13 in part. What each check printed is in <code>docs/build-log.md</code> in the repository.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Step</th><th>What we build</th><th>How we verify it</th></tr></thead>
@@ -422,7 +430,7 @@ h3[id] { scroll-margin-top: 24px; }
             <tr><td class="num">10</td><td>Live view: events, stream, watch page</td><td>During an a2gov.org crawl, <code>/live/{id}</code> shows each page as it is fetched. A refresh keeps the history, and the final counters match the database.</td></tr>
             <tr><td class="num">11</td><td>Evaluation script</td><td>Prints must-find recall and precision@10 for each site.</td></tr>
             <tr><td class="num">12</td><td>README</td><td>A fresh clone runs end to end by following it.</td></tr>
-            <tr><td class="num">13</td><td>If time: browser render, N workers, PDF text layer</td><td>The crawl reaches ASU's finance hub and the ClearGov budget, and the same evaluation runs before and after.</td></tr>
+            <tr><td class="num">13</td><td>If time: browser render, N workers, PDF text layer. <strong>Built:</strong> the browser render (off by default) and 3 workers. <strong>Not built:</strong> the PDF text layer.</td><td>Boerne's jobs site, an empty shell to a plain fetch, is rendered and gives the HR contacts with email and phone. The browser opens only pages on the entity's own site, so the ClearGov budget stays a ranked link flagged <code>needs_browser</code>.</td></tr>
           </tbody>
         </table>
       </div>
@@ -430,7 +438,7 @@ h3[id] { scroll-margin-top: 24px; }
 
     <section id="testset" aria-labelledby="h-testset">
       <h2 id="h-testset">Test set</h2>
-      <p>Seventeen real cases, each one a problem the crawler has to handle. Every case was checked with a plain request on November 7, 2026. Cases marked 13 are handled only if time is left; until then the crawler flags them and moves on. Each case gets a saved snapshot of the HTML or headers, so tests run offline and give the same result every time. Before submitting, we also run one live check per case by hand.</p>
+      <p>Seventeen real cases, each one a problem the crawler has to handle. Every case was checked with a plain request on November 7, 2026. Cases marked 13 were left for the last step and are still not solved: the link is ranked from its anchor and heading, and a page drawn by scripts is flagged <code>needs_browser</code>. The render tier built in step 13 opens only pages on the entity's own site. Each case gets a saved snapshot of the HTML or headers, so tests run offline and give the same result every time. Before submitting, we also run one live check per case by hand.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Case</th><th>Example</th><th>What a plain request returned</th><th>What the crawler must do</th><th>Step</th></tr></thead>
@@ -459,7 +467,7 @@ h3[id] { scroll-margin-top: 24px; }
 
     <section id="stack" aria-labelledby="h-stack">
       <h2 id="h-stack">Stack</h2>
-      <p>TypeScript end to end on Node 22, matching Pursuit's stack. Read it top to bottom: a request enters at the interface and works down to storage.</p>
+      <p>TypeScript end to end, matching Pursuit's stack. The Docker image runs Node 22, and Node 20.12 or later runs it too. Read it top to bottom: a request enters at the interface and works down to storage.</p>
       <ol class="layers">
         <li class="layer">
           <div class="layer-name"><span class="layer-k">Interface</span><span class="layer-role">Takes requests, validates them, documents itself, streams progress</span></div>
@@ -467,15 +475,15 @@ h3[id] { scroll-margin-top: 24px; }
         </li>
         <li class="layer">
           <div class="layer-name"><span class="layer-k">Crawler</span><span class="layer-role">Fetches pages politely and pulls out links with context</span></div>
-          <div class="chips"><span class="chip">undici</span><span class="chip">robots-parser</span><span class="chip">cheerio</span><span class="chip plain">Playwright · if time</span></div>
+          <div class="chips"><span class="chip">fetch · built in</span><span class="chip">robots-parser</span><span class="chip">cheerio</span><span class="chip">Playwright · off by default</span></div>
         </li>
         <li class="layer">
           <div class="layer-name"><span class="layer-k">Ranking and extraction</span><span class="layer-role">Scores every link and pulls out contacts, cheapest tier first</span></div>
-          <div class="chips"><span class="chip">Rules in TypeScript</span><span class="chip cost">Small LLM · JSON schema</span><span class="chip plain">Ollama · local option</span></div>
+          <div class="chips"><span class="chip">Rules in TypeScript</span><span class="chip cost">gpt-4o-mini · JSON schema</span></div>
         </li>
         <li class="layer">
           <div class="layer-name"><span class="layer-k">Documents</span><span class="layer-role">Reads the text layer behind vague PDF links</span></div>
-          <div class="chips"><span class="chip plain">pdfjs-dist · if time</span></div>
+          <div class="chips"><span class="chip plain">pdfjs-dist · not built</span></div>
         </li>
         <li class="layer">
           <div class="layer-name"><span class="layer-k">Data</span><span class="layer-role">Links, sightings, contacts, crawl events and full-text search</span></div>
@@ -513,7 +521,7 @@ h3[id] { scroll-margin-top: 24px; }
         <div class="tile">
           <h4>Sites built with JavaScript</h4>
           <dl class="ab">
-            <dt>A</dt><dd>Plain HTML first, then the sitemap. A page whose HTML looks empty is flagged <code>needs_browser</code> and reported. If time allows, Playwright renders flagged pages.</dd>
+            <dt>A</dt><dd>Plain HTML first, then the sitemap. A page whose HTML looks empty is flagged <code>needs_browser</code> and reported. With the render tier on (off by default), Playwright opens flagged pages on the entity's own site, at most 20 per crawl.</dd>
             <dt class="b">B</dt><dd>A separate browser worker pool, so slow renders never hold up plain fetches.</dd>
           </dl>
           <a class="more" href="#fetch">Fetching</a>
@@ -529,7 +537,7 @@ h3[id] { scroll-margin-top: 24px; }
         <div class="tile">
           <h4>Scanned PDFs</h4>
           <dl class="ab">
-            <dt>A</dt><dd>PDFs are ranked by their link, not their content. If time allows, read the text layer of vague PDF links. A PDF with no text layer is a scan: it is flagged <code>needs_ocr</code> and keeps its link-level score.</dd>
+            <dt>A</dt><dd>PDFs are ranked by their link, not their content. Reading the text layer of vague PDF links was left for the last step and not built, so scans are not detected yet.</dd>
             <dt class="b">B</dt><dd>OCR workers process flagged files that already score high, then chunk and index them.</dd>
           </dl>
           <a class="more" href="#documents">Vague document links</a>
@@ -551,7 +559,7 @@ h3[id] { scroll-margin-top: 24px; }
 
       <figure>
         <div class="dg wide">
-          <svg viewBox="0 0 1010 470" role="img" aria-label="Design A architecture, on the same grid as Design B. Clients call the API, which sends seed URLs through the seen check into the frontier queue, a table in Postgres. The fetcher takes the next URL from the frontier queue and writes raw pages to local disk. Extract and rank reads each new page, pulls out links, contacts and files, sends only unclear items to OpenAI, upserts results into Postgres, and sends new links with a path score through the seen check back into the frontier queue. The API serves lookups from Postgres and streams live events to the live view. A browser render is a later step, and the scheduler, document pipeline and search index are Design B only.">
+          <svg viewBox="0 0 1010 470" role="img" aria-label="Design A architecture, on the same grid as Design B. Clients call the API, which sends seed URLs through the seen check into the frontier queue, a table in Postgres. The fetcher takes the next URL from the frontier queue and writes raw pages to local disk. Extract and rank reads each new page, pulls out links, contacts and files, sends only unclear items to OpenAI, upserts results into Postgres, and sends new links with a path score through the seen check back into the frontier queue. The API serves lookups from Postgres and streams live events to the live view. A browser render, off by default, opens pages drawn by scripts. The scheduler, document pipeline and search index are Design B only.">
             <defs>
               <marker id="da-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
               <marker id="da-ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk accent" d="M0 0 L10 5 L0 10 z"/></marker>
@@ -559,9 +567,9 @@ h3[id] { scroll-margin-top: 24px; }
             </defs>
 
             <!-- later step or Design B only (dashed) -->
-            <rect class="box ghost" x="430" y="20" width="150" height="60" rx="6"/>
-            <text class="t ghost" x="505" y="46" text-anchor="middle">Browser (Playwright)</text>
-            <text class="s ghost" x="505" y="64" text-anchor="middle">if time · flag for now</text>
+            <rect class="box" x="430" y="20" width="150" height="60" rx="6"/>
+            <text class="t" x="505" y="46" text-anchor="middle">Browser (Playwright)</text>
+            <text class="s" x="505" y="64" text-anchor="middle">off by default · own site</text>
             <rect class="box ghost" x="10" y="130" width="150" height="60" rx="6"/>
             <text class="t ghost" x="85" y="156" text-anchor="middle">Scheduler</text>
             <text class="s ghost" x="85" y="174" text-anchor="middle">Design B only</text>
@@ -614,8 +622,8 @@ h3[id] { scroll-margin-top: 24px; }
             <!-- flows -->
             <path class="ln" d="M370 160 H428" marker-end="url(#da-m)"/>
             <text class="lbl" x="399" y="152" text-anchor="middle">next URL</text>
-            <path class="ln ghost" d="M505 84 V128" marker-start="url(#da-m)" marker-end="url(#da-m)"/>
-            <text class="lbl ghost" x="513" y="110">render</text>
+            <path class="ln" d="M505 84 V128" marker-start="url(#da-m)" marker-end="url(#da-m)"/>
+            <text class="lbl" x="513" y="110">render</text>
             <path class="ln" d="M580 160 H638" marker-end="url(#da-m)"/>
             <text class="lbl" x="609" y="152" text-anchor="middle">raw bytes</text>
             <path class="ln" d="M715 190 V248" marker-end="url(#da-m)"/>
@@ -718,7 +726,7 @@ returning f.url, f.host;
           <tbody>
             <tr><td>1. Plain HTML</td><td>Always first. JSON embedded in the page (menus and cards that scripts draw) is read too: that is how ASU's CFO is found.</td><td>One request.</td></tr>
             <tr><td>2. Sitemap</td><td>When <code>robots.txt</code> lists one, or <code>/sitemap.xml</code> exists. Gives a list of pages without running anything.</td><td>One or a few requests.</td></tr>
-            <tr><td>3. Headless browser</td><td>Only when the HTML looks empty: few links, an empty app root, or navigation built by script. Built if time allows. Until then the page is flagged <code>needs_browser</code> and reported.</td><td><span class="pill cost">Expensive</span> An order of magnitude more CPU and time.</td></tr>
+            <tr><td>3. Headless browser</td><td>Only when the HTML looks empty: few links, an empty app root, or navigation built by script. Built, and off by default (<code>RENDER_JS=true</code> turns it on): only pages on the entity's own site that answered 200, at most 20 per crawl. With it off, the page is flagged <code>needs_browser</code> and reported.</td><td><span class="pill cost">Expensive</span> An order of magnitude more CPU and time.</td></tr>
             <tr><td>4. Mark blocked</td><td>When the site still refuses automated clients.</td><td>Reported in crawl status and in the README.</td></tr>
           </tbody>
         </table>
@@ -812,6 +820,7 @@ returning f.url, f.host;
             <tr><td>Keyword in section heading or nearby text</td><td>Link sits under "Financial Reports"</td><td class="num">+0.15</td></tr>
             <tr><td>Parent page path score</td><td>Found on the Finance page</td><td class="num">+0.10</td></tr>
             <tr><td>Fiscal year recency</td><td>FY2026 ranks above FY2014</td><td class="num">× 0.6–1.0</td></tr>
+            <tr><td>Document on another government's site (<code>.gov</code>, <code>.mil</code>, state and local <code>.us</code>)</td><td>A State of Arizona budget summary on <code>ospb.az.gov</code>, linked from ASU</td><td class="num">× 0.75</td></tr>
             <tr><td>Site-wide boilerplate</td><td>Same link in the nav or footer of every page</td><td class="num">−0.20</td></tr>
             <tr><td>Known noise</td><td>Social, login, calendar, news</td><td class="num">−0.40</td></tr>
           </tbody>
@@ -834,19 +843,20 @@ returning f.url, f.host;
                                                        "comptroller", "finance manager"] }
   }
 }</code></pre>
+      <p>The same keywords can be edited without writing JSON. The start page has a keyword editor, with a card per group: kind, a weight slider, synonyms, and related titles for contacts. The results page holds the same editor with a re-rank button: <code>POST /v1/crawls/{id}/rescore</code> ranks a finished crawl again from its saved pages, without fetching, on rules alone by default.</p>
 
       <h3>The LLM tier, and embeddings later</h3>
       <ul class="list">
         <li><strong>LLM:</strong> it never sees a whole page or a whole site. It sees short link records (anchor, URL, heading, about 200 characters of nearby text) for links the rules left between 0.2 and 0.7, in batches of about 50, with a strict JSON schema: type, target score, path score, a short reason. The code validates every answer and keeps the rules score if the call fails. The product never depends on the model behaving.</li>
         <li><strong>Cache:</strong> every LLM answer is stored under a hash of the model, the prompt version and the input. A rerun on the same pages pays nothing and gives the same result, and tests run offline on the stored answers.</li>
         <li><strong>No key, no LLM:</strong> without an API key the LLM tier is skipped. Unsure links keep their rules score, and contacts come from simple patterns such as "Name, Title". The whole system runs end to end without paid services.</li>
-        <li><strong>After the LLM, the rules' multipliers still apply:</strong> older fiscal years, drafts, and pages on the entity's own site (nearly always the list, not the document). Built and checked against the real API: the LLM confirmed ASU's ACFRs that the rules left at 0.52-0.69, and gave every year 1.00 until the year multiplier was applied after it.</li>
+        <li><strong>After the LLM, the rules' multipliers still apply:</strong> older fiscal years, drafts, pages on the entity's own site (nearly always the list, not the document), and documents on another government's site. With the last one, ASU's top 10 is all its own documents, and the state's budget summaries come 11th and 12th. Built and checked against the real API: the LLM confirmed ASU's ACFRs that the rules left at 0.52-0.69, and gave every year 1.00 until the year multiplier was applied after it.</li>
         <li><strong>Spending cap:</strong> <code>LLM_MAX_USD_PER_CRAWL</code> (default $0.50). Past it, the crawl continues on rules alone. A crawl of the three reachable test sites cost a few cents with <code>gpt-4o-mini</code>.</li>
         <li><strong>Embeddings, later:</strong> cosine similarity between the link's anchor plus context and each target concept would catch paraphrases that no keyword list covers, and take load off the LLM. It is the first thing to add once the evaluation shows where the rules miss.</li>
       </ul>
 
-      <h3 id="documents">Vague document links · if time</h3>
-      <p>A link that says only "View" or "Document 1234" gives the rules nothing to work with. For PDF links with a promising path score, the crawler downloads the file (under the size cap) and reads the text layer of the first two pages. The LLM then returns the document type and fiscal year. Most budget books and ACFRs are generated digitally and already have a text layer. A PDF with no text layer is a scan. It is flagged <code>needs_ocr</code> and keeps its link-level score. In Design B, OCR workers process flagged files that already score high.</p>
+      <h3 id="documents">Vague document links · not built</h3>
+      <p>Planned for the last step and not built; this is how it would work. A link that says only "View" or "Document 1234" gives the rules nothing to work with. For PDF links with a promising path score, the crawler downloads the file (under the size cap) and reads the text layer of the first two pages. The LLM then returns the document type and fiscal year. Most budget books and ACFRs are generated digitally and already have a text layer. A PDF with no text layer is a scan. It is flagged <code>needs_ocr</code> and keeps its link-level score. In Design B, OCR workers process flagged files that already score high.</p>
     </section>
 
     <section id="contacts" aria-labelledby="h-contacts">
@@ -1032,13 +1042,18 @@ create index on crawl_events (crawl_id, id);</code></pre>
           <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
           <tbody>
             <tr><td><code>POST</code></td><td><code>/v1/crawls</code></td><td>Start a crawl with a seed URL, keyword weights, max depth and page budget. <code>max_depth: 0</code> analyzes a single page. Returns 202 with a crawl ID. Accepts an <code>Idempotency-Key</code> header.</td></tr>
-            <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}</code></td><td>Status (queued, running, done, blocked, failed) and counters.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}</code></td><td>Status (queued, running, done, blocked, failed, cancelled) and counters.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/crawls</code></td><td>Recent crawls.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/v1/crawls/{id}/cancel</code></td><td>Stop a queued or running crawl. Pages in flight finish, the rest of the queue is skipped, and the status becomes cancelled, which nothing overwrites. 409 if the crawl already ended.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/v1/crawls/{id}/rescore</code></td><td>Rank a finished crawl again from its saved pages with new keywords, without fetching.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/v1/keywords</code></td><td>The default keyword groups, to start an edit from.</td></tr>
             <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}/events</code></td><td>Live stream of the crawl's events (Server-Sent Events). See <a href="#live">Live view</a>.</td></tr>
             <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}/pages</code></td><td>Pages by status: queued, fetching, done, failed, skipped, each with the reason.</td></tr>
             <tr><td><code>GET</code></td><td><code>/v1/links</code></td><td>Scores belong to a crawl, so pass <code>crawl_id</code>, or <code>host</code> to read that host's latest crawl. Filter by <code>type</code>, <code>doc_type</code>, <code>fiscal_year</code>, <code>min_score</code>, <code>keyword</code>. <code>q</code> runs full-text search. Cursor pagination.</td></tr>
             <tr><td><code>GET</code></td><td><code>/v1/links/{id}</code></td><td>One link with every sighting.</td></tr>
             <tr><td><code>GET</code></td><td><code>/v1/contacts</code></td><td>Contacts by host, title or minimum score, each with its source page and snippet.</td></tr>
             <tr><td><code>GET</code></td><td><code>/live/{id}</code></td><td>The watch page for a crawl.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/results/{id}</code></td><td>The results page: search documents and contacts, edit the keywords and re-rank.</td></tr>
             <tr><td><code>GET</code></td><td><code>/docs</code></td><td>OpenAPI spec and interactive docs.</td></tr>
           </tbody>
         </table>
@@ -1103,6 +1118,7 @@ create index on crawl_events (crawl_id, id);</code></pre>
         <li><strong>How it works:</strong> at each step the crawler emits an event. The event is written to <code>crawl_events</code>, pushed to every open stream, and announced on a Postgres <code>NOTIFY</code> channel, so a crawl started from the command line shows up live in the API's watch page. The watch page first loads the current state from <code>GET /v1/crawls/{id}</code>, then listens, so a refresh keeps the history.</li>
         <li><strong>Why Server-Sent Events:</strong> data flows one way, from server to viewer. It is a plain HTTP response, the browser reconnects on its own and resumes from the last event ID, and it can be tested with <code>curl</code>. A WebSocket would add a two-way channel nobody uses.</li>
         <li><strong>The watch page</strong> is one static HTML file with a few lines of script. No front-end build.</li>
+        <li><strong>Stop:</strong> while a crawl is queued or running, the watch page shows a Stop button. A runner in another process learns of the stop from its heartbeat, and the stream ends with <code>crawl.cancelled</code>.</li>
       </ul>
       <p class="pre-label">GET /v1/crawls/{id}/events</p>
 <pre><code>id: 4312
@@ -1122,11 +1138,11 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
       <h2 id="h-eval">Evaluation</h2>
       <p>Ranking quality is measured, not eyeballed.</p>
       <ul class="list">
-        <li><strong>Must-find list:</strong> for each site, the latest budget, the latest ACFR and the finance contact with the right title and email. Recall on this list is the headline number.</li>
-        <li><strong>Labeled set:</strong> about 50 hand-labeled links per reachable test site, each marked relevant or not, with its type.</li>
-        <li><strong>Precision@10</strong> per site and per type.</li>
-        <li><strong>Cost per tier:</strong> the share of links decided by rules and by the LLM, and LLM tokens per 1,000 pages.</li>
-        <li><strong>Runs in CI.</strong> A change to weights, thresholds or prompts that lowers precision fails the build.</li>
+        <li><strong>Must-find list</strong> (<code>eval/must-find.json</code>, written by hand before the crawler ran): for each site, the latest budget, the latest ACFR and the finance contact with the right title and email. A target counts as found when it is in the top 10 of its type. Recall on this list is the headline number: 9 of 9, with the LLM and with rules alone.</li>
+        <li><strong>Precision@10 for documents:</strong> how many of the ten best name a finance document in the link text, the URL or the heading above the link, and belong to the entity. A host listed as someone else's, such as the State of Arizona's budget office, never counts. With the LLM it is 10 of 10 at all three reachable sites; with rules alone, 7 of 10 at ASU.</li>
+        <li><strong>Cost per tier:</strong> how many links the LLM decided, and what the run cost.</li>
+        <li><strong>The same crawls, ranked twice:</strong> once with the LLM and once with rules alone, from the saved pages. Results are in <code>eval/results.md</code> and <code>eval/results-rules-only.md</code>.</li>
+        <li><strong>Not built:</strong> a hand-labeled set of about 50 links per site, and a CI check that fails the build when precision drops.</li>
       </ul>
     </section>
 
@@ -1140,8 +1156,8 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
             <tr><td>Setup</td><td>One command to start everything (<code>docker compose up</code>), an optional environment variable for the LLM key (without it everything runs on rules alone), and one command that crawls the four test sites.</td></tr>
             <tr><td>Prioritization approach</td><td>The rule signals and their weights, how keywords and synonyms are set per crawl, when the LLM runs and what it sees, how contacts are verified, and one real link traced from anchor to final score.</td></tr>
             <tr><td>API usage</td><td>Every endpoint with a <code>curl</code> request and a real response, plus how to open the live view.</td></tr>
-            <tr><td>Results and limits</td><td>What was found on each test site, the evaluation numbers, and what is not handled yet: Bozeman is blocked, script-built pages are flagged, scans are not read.</td></tr>
-            <tr><td>At scale</td><td>A short summary of Design B, with a link to the full write-up.</td></tr>
+            <tr><td>Results and limits</td><td>What was found on each test site, the evaluation numbers, and the known limits: pages drawn by scripts off the entity's own site are flagged, and scans are not read.</td></tr>
+            <tr><td>At scale</td><td>A short summary, with a link to <code>docs/scaling.md</code>: the measured numbers, what breaks first and the fix, freshness, and rough cost.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1150,7 +1166,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
     <div class="part" id="design-b">
       <p class="part-k">Design B</p>
       <h2 class="part-h">The ambitious version</h2>
-      <p>What this becomes at Pursuit's scale: millions of pages a day across every public entity, two stores, and search by meaning inside the documents. None of this part is built in the take-home.</p>
+      <p>What this becomes at Pursuit's scale: millions of pages a day across every public entity, two stores, and search by meaning inside the documents. None of this part is built in the take-home. The repository's <code>docs/scaling.md</code> is the shorter version, written from the numbers the test crawls measured.</p>
     </div>
 
     <section id="compare" aria-labelledby="h-compare">
@@ -1160,13 +1176,13 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
         <table>
           <thead><tr><th>Part</th><th>Design A · we build</th><th>Design B · ambitious</th></tr></thead>
           <tbody>
-            <tr><td>Frontier</td><td>Postgres table, walked best-first by one process. N workers with SKIP LOCKED if time allows.</td><td>Kafka or SQS, partitioned by host hash, fed by a recrawl scheduler</td></tr>
+            <tr><td>Frontier</td><td>Postgres table, walked best-first by one process with 3 async workers, which claim with SKIP LOCKED.</td><td>Kafka or SQS, partitioned by host hash, fed by a recrawl scheduler</td></tr>
             <tr><td>Seen set</td><td>Postgres unique key on the URL hash</td><td>Bloom filter in Redis, with the Postgres key as the final word</td></tr>
-            <tr><td>Fetching</td><td>One request at a time per host, with a delay. Script-built pages are flagged.</td><td>Stateless fetcher pool plus a separate browser pool</td></tr>
+            <tr><td>Fetching</td><td>One request at a time per site, with a delay. Script-built pages are flagged, and rendered when the render tier is on.</td><td>Stateless fetcher pool plus a separate browser pool</td></tr>
             <tr><td>Raw pages</td><td>Gzip files on local disk, keyed by URL hash</td><td>Object store keyed by content hash</td></tr>
             <tr><td>Ranking</td><td>Rules → LLM</td><td>Rules → embeddings → LLM, plus a small classifier trained on the LLM's labels</td></tr>
             <tr><td>Contacts</td><td>Rules find emails and phones, the LLM reads name and title, the code checks both against the page</td><td>Same, plus matching the same person across sites and noticing when someone leaves</td></tr>
-            <tr><td>Documents</td><td>Ranked by their link. If time allows, the text layer of vague PDF links.</td><td>Full text, OCR for scans, chunked and embedded</td></tr>
+            <tr><td>Documents</td><td>Ranked by their link.</td><td>Full text, OCR for scans, chunked and embedded</td></tr>
             <tr><td>Storage</td><td>One Postgres</td><td>Postgres as source of truth, plus a search index fed by CDC</td></tr>
             <tr><td>Search</td><td>Full-text search over links, inside Postgres</td><td>Hybrid search (keywords plus vectors) over links and document chunks, with a reranker</td></tr>
             <tr><td>Progress</td><td>Live view: event stream and a watch page per crawl</td><td>Metrics and dashboards per host, tier and crawl</td></tr>
@@ -1339,7 +1355,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
           <thead><tr><th>Decision</th><th>Reason</th><th>Cost accepted</th></tr></thead>
           <tbody>
             <tr><td>Page analysis first, crawler second</td><td>The objective is ranking the links on a page and pulling out contacts and files. The crawler only feeds it pages.</td><td>Results across a whole site arrive later in the build.</td></tr>
-            <tr><td>One process before many workers</td><td>Four sites at one request at a time per host do not need parallel workers. The queue table and claim query are already the ones workers would use.</td><td>A crawl of the four sites takes minutes, not seconds.</td></tr>
+            <tr><td>One process, a few workers</td><td>At one request at a time per site, one process is enough. Its 3 async workers overlap the waits on different sites, and the claim query already works across processes.</td><td>A crawl of one site takes minutes, not seconds: 0.2 to 0.7 pages a second, measured.</td></tr>
             <tr><td>One runner per crawl, with a lease</td><td>Found on a real run: the API server resumed crawls the CLI had just started, and both worked on them. A lease renewed every 1.5 seconds lets another process take over only when the runner dies.</td><td>A crawl whose runner dies waits 30 seconds before another process picks it up.</td></tr>
             <tr><td>Scores stored per crawl</td><td>Keywords are set per crawl, so a score only means something next to the keywords that produced it.</td><td>More rows, and reading a link's score needs a join.</td></tr>
             <tr><td>Contacts checked against the page text</td><td>An LLM can produce a plausible email that is not on the page. Only values found in the page are stored.</td><td>Contacts shown as images or behind forms are missed.</td></tr>
