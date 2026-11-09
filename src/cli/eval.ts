@@ -2,6 +2,7 @@
 // Usage:
 //   npm run eval            uses the latest crawl of each test site
 //   npm run eval -- --run   crawls the four sites first (several minutes)
+//   add --out <file> to write somewhere other than eval/results.md
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +44,10 @@ const out = (s = "") => {
 };
 out(`# Evaluation · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`);
 out("");
+if (process.argv.includes("--run")) {
+  out(`Crawled for this report: depth 3, page budget 300, LLM ${ctx.llm.enabled ? ctx.llm.model : "off"}, browser rendering ${ctx.config.RENDER_JS ? "on" : "off"}.`);
+  out("");
+}
 out("| Site | Crawl | Must-find | Precision@10 (documents) | Links decided by the LLM |");
 out("|---|---|---|---|---|");
 
@@ -62,7 +67,7 @@ for (const site of spec.sites) {
     out(`| ${site.name} | no crawl yet | - | - | - |`);
     continue;
   }
-  const crawlText = `${crawl.status}, ${crawl.pages_fetched} pages`;
+  const crawlText = `${crawl.status}, ${crawl.pages_fetched} pages (\`${crawl.id.slice(0, 8)}\`)`;
   if (site.expect_blocked) {
     const ok = crawl.status === "blocked";
     out(`| ${site.name} | ${crawlText} | ${ok ? "blocked and reported, as expected" : "expected a blocked report"} | - | - |`);
@@ -124,6 +129,8 @@ out(
 );
 for (const d of details) out(d);
 
-await writeFile(resolve(root, "eval/results.md"), `${lines.join("\n")}\n`);
-console.log("\nwritten to eval/results.md");
+const outIdx = process.argv.indexOf("--out");
+const outFile = outIdx > 0 && process.argv[outIdx + 1] ? process.argv[outIdx + 1]! : "eval/results.md";
+await writeFile(resolve(root, outFile), `${lines.join("\n")}\n`);
+console.log(`\nwritten to ${outFile}`);
 await ctx.close();

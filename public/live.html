@@ -22,6 +22,9 @@
   .pill.running { color: var(--accent); border-color: var(--accent); }
   .pill.done { color: var(--ok); border-color: var(--ok); }
   .pill.blocked, .pill.failed { color: var(--bad); border-color: var(--bad); }
+  .pill.cancelled { color: var(--warn); border-color: var(--warn); }
+  #stop { font: 600 12px/1 system-ui; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--bad); background: var(--surface); color: var(--bad); cursor: pointer; }
+  #stop:disabled { opacity: .6; cursor: default; }
   .muted { color: var(--muted); }
   .detail { padding: 0 20px; color: var(--muted); }
   .now { margin: 8px 20px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
@@ -52,6 +55,7 @@
   <span id="elapsed" class="muted"></span>
   <a id="results" href="#">Search results</a>
   <a id="api" class="muted" href="#">JSON</a>
+  <button id="stop" type="button" hidden title="Fetch nothing more. Pages being fetched finish; what was found stays.">Stop crawl</button>
 </header>
 <div id="detail" class="detail"></div>
 <div class="now"><span class="muted">Now</span> <span id="now">–</span></div>
@@ -99,7 +103,8 @@
     el.textContent = status;
     el.className = "pill " + status;
     $("detail").textContent = detail || "";
-    if (["done", "blocked", "failed"].includes(status)) { finishedAt = finishedAt || Date.now(); $("now").textContent = "–"; }
+    if (["done", "blocked", "failed", "cancelled"].includes(status)) { finishedAt = finishedAt || Date.now(); $("now").textContent = "–"; }
+    $("stop").hidden = !["queued", "running"].includes(status);
   }
 
   function setCounters(c) {
@@ -169,11 +174,25 @@
     on("contact.found", (d) => addRow("★ contact", "star", Number(d.score).toFixed(2), d.page, `${d.name} · ${d.title || ""}`, "star"));
     on("llm.capped", (d) => addRow("llm", "warn", "", crawl.seed_url, `spending cap $${d.cap_usd} reached: rules only from here`, "warn"));
     on("stats", (d) => setCounters(d));
-    for (const end of ["crawl.done", "crawl.blocked", "crawl.failed"]) {
-      on(end, (d) => { setStatus(end.split(".")[1], d.detail); addRow("end", end === "crawl.done" ? "ok" : "bad", "", crawl.seed_url, d.detail || end); refreshResults(); es.close(); });
+    for (const end of ["crawl.done", "crawl.blocked", "crawl.failed", "crawl.cancelled"]) {
+      const cls = end === "crawl.done" ? "ok" : end === "crawl.cancelled" ? "warn" : "bad";
+      on(end, (d) => { setStatus(end.split(".")[1], d.detail); addRow("end", cls, "", crawl.seed_url, d.detail || end); refreshResults(); es.close(); });
     }
     setInterval(() => { if (!finishedAt) refreshResults(); }, 5000);
   }
+
+  $("stop").addEventListener("click", async () => {
+    if (!confirm("Stop this crawl? Pages being fetched finish; nothing new is fetched. What was found so far stays.")) return;
+    const btn = $("stop");
+    btn.disabled = true;
+    btn.textContent = "Stopping…";
+    const r = await fetch(`/v1/crawls/${id}/cancel`, { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { $("status").textContent = "cancelled"; $("status").className = "pill cancelled"; $("detail").textContent = "Stopping: finishing the pages being fetched…"; return; }
+    btn.disabled = false;
+    btn.textContent = "Stop crawl";
+    $("detail").textContent = j.error ? j.error.message : "could not stop the crawl";
+  });
 
   setInterval(() => {
     if (!started) return;

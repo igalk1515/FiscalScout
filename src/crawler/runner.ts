@@ -74,6 +74,8 @@ interface CrawlState {
   /** Spend of the whole crawl so far, including earlier runs of it. */
   llmSpent: number;
   llmCapped: boolean;
+  /** Set when the crawl is cancelled: workers claim nothing more. */
+  cancelled: boolean;
 }
 
 const ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
@@ -89,6 +91,7 @@ const SIGN_IN_URL = /[/.?&=_-](log-?in|log-?on|sign-?in|sign-?on|sso|adfs|oauth2
  */
 export class CrawlRunner {
   private running = new Map<string, Promise<void>>();
+  private states = new Map<string, CrawlState>();
   private readonly runnerId = randomUUID();
   private robots = new Map<string, { policy: RobotsPolicy; at: number }>();
   private stopping = false;
@@ -120,6 +123,24 @@ export class CrawlRunner {
     return this.running.has(crawlId);
   }
 
+  /**
+   * Stops the workers of a cancelled crawl at once if it runs in this process; pages being
+   * fetched finish. (A runner in another process learns it from its next heartbeat.) True when
+   * the crawl runs here, so this runner will announce the end.
+   */
+  cancel(crawlId: string): boolean {
+    const state = this.states.get(crawlId);
+    if (state) state.cancelled = true;
+    return this.running.has(crawlId);
+  }
+
+  /** Closes a cancelled crawl: skips what is still queued and announces it, once. */
+  async settleCancelled(crawlId: string, pages: number): Promise<void> {
+    await repo.skipQueued(this.o.db, crawlId, "crawl cancelled");
+    const detail = `${repo.CANCEL_REQUESTED} after ${pages} pages`;
+    if (await repo.settleCancelled(this.o.db, crawlId, detail)) await this.o.events.emit(crawlId, "crawl.cancelled", { detail, pages });
+  }
+
   async stop(): Promise<void> {
     this.stopping = true;
     await Promise.allSettled([...this.running.values()]);
@@ -129,13 +150,15 @@ export class CrawlRunner {
     const { db, events } = this.o;
     const crawl = await repo.getCrawl(db, crawlId);
     if (!crawl || ["done", "blocked", "failed"].includes(crawl.status)) return;
+    if (crawl.status === "cancelled") return this.settleCancelled(crawlId, crawl.pages_fetched + crawl.pages_failed);
     // One runner per crawl: if another process holds a fresh lease, leave the crawl to it.
     if (!(await repo.acquireCrawl(db, crawlId, this.runnerId))) {
       this.o.log.info({ crawlId }, "crawl is running in another process");
       return;
     }
     await repo.resetStale(db, crawlId);
-    await repo.setCrawlStatus(db, crawlId, "running");
+    // False when the crawl was cancelled while it was starting.
+    if (!(await repo.setCrawlStatus(db, crawlId, "running"))) return this.settleCancelled(crawlId, crawl.pages_fetched + crawl.pages_failed);
     const state: CrawlState = {
       crawl,
       groups: compileKeywords(crawl.keywords),
@@ -151,7 +174,9 @@ export class CrawlRunner {
       llmCost: 0,
       llmSpent: crawl.llm_cost_usd,
       llmCapped: false,
+      cancelled: false,
     };
+    this.states.set(crawlId, state);
     await events.emit(crawlId, "crawl.started", {
       seed: crawl.seed_url,
       max_depth: crawl.max_depth,
@@ -162,12 +187,22 @@ export class CrawlRunner {
 
     const ticker = setInterval(() => {
       void this.emitStats(state);
-      void repo.heartbeat(db, crawlId, this.runnerId).catch(() => {});
+      void repo
+        .heartbeat(db, crawlId, this.runnerId)
+        .then((status) => {
+          if (status === "cancelled") state.cancelled = true;
+        })
+        .catch(() => {});
     }, 1500);
     try {
       await Promise.all(Array.from({ length: this.o.workers }, () => this.worker(state)));
     } finally {
       clearInterval(ticker);
+      this.states.delete(crawlId);
+    }
+    if (state.cancelled) {
+      await this.emitStats(state);
+      return this.settleCancelled(crawlId, state.claimed);
     }
 
     const budgetHit = state.claimed >= crawl.page_budget;
@@ -192,14 +227,15 @@ export class CrawlRunner {
     }
     if (this.stopping) return; // stopped mid-crawl: leave it running so a restart resumes it
     await this.emitStats(state);
-    await repo.setCrawlStatus(db, crawlId, status, detail);
+    // Cancelled just as it finished: the cancel stands.
+    if (!(await repo.setCrawlStatus(db, crawlId, status, detail))) return this.settleCancelled(crawlId, state.claimed);
     await events.emit(crawlId, `crawl.${status}`, { detail, pages: state.claimed });
   }
 
   private async worker(state: CrawlState) {
     const { db } = this.o;
     const id = state.crawl.id;
-    while (!this.stopping) {
+    while (!this.stopping && !state.cancelled) {
       if (state.claimed >= state.crawl.page_budget) return;
       const explore = Math.random() < (this.o.exploreRate ?? 0.1);
       // No host other than the main site may take more than 30% of the budget, so one big

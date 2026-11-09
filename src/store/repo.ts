@@ -15,7 +15,7 @@ async function ensureHosts(q: Db | DbClient, hosts: string[]) {
   );
 }
 
-export type CrawlStatus = "queued" | "running" | "done" | "blocked" | "failed";
+export type CrawlStatus = "queued" | "running" | "done" | "blocked" | "failed" | "cancelled";
 
 export interface CrawlRow {
   id: string;
@@ -36,6 +36,8 @@ export interface CrawlRow {
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
+  runner_id: string | null;
+  heartbeat_at: Date | null;
 }
 
 export interface NewCrawl {
@@ -104,14 +106,40 @@ export async function setCrawlKeywords(db: Db, id: string, keywords: KeywordConf
   await db.query("update crawls set keywords = $2 where id = $1", [id, JSON.stringify(keywords)]);
 }
 
-export async function setCrawlStatus(db: Db, id: string, status: CrawlStatus, detail: string | null = null) {
-  await db.query(
+/** Sets the status, unless the crawl was cancelled: that is final. False when nothing changed. */
+export async function setCrawlStatus(db: Db, id: string, status: CrawlStatus, detail: string | null = null): Promise<boolean> {
+  const r = await db.query(
     `update crawls set status = $2, status_detail = $3,
        started_at = case when $2 = 'running' then coalesce(started_at, now()) else started_at end,
        finished_at = case when $2 in ('done', 'blocked', 'failed') then now() else finished_at end
-     where id = $1`,
+     where id = $1 and status <> 'cancelled'`,
     [id, status, detail],
   );
+  return (r.rowCount ?? 0) > 0;
+}
+
+export const CANCEL_REQUESTED = "cancelled by request";
+
+/** Marks a queued or running crawl cancelled. Null when the crawl had already finished. */
+export async function cancelCrawl(db: Db, id: string): Promise<CrawlRow | null> {
+  const r = await db.query<CrawlRow>(
+    `update crawls set status = 'cancelled', status_detail = $2, finished_at = now()
+     where id = $1 and status in ('queued', 'running') returning *`,
+    [id, CANCEL_REQUESTED],
+  );
+  return r.rows[0] ?? null;
+}
+
+/**
+ * The runner and the API may both try to close a cancelled crawl; only the first one does, so
+ * the crawl.cancelled event goes out once. True for the one that should announce it.
+ */
+export async function settleCancelled(db: Db, id: string, detail: string): Promise<boolean> {
+  const r = await db.query(
+    "update crawls set status_detail = $3 where id = $1 and status = 'cancelled' and status_detail = $2",
+    [id, CANCEL_REQUESTED, detail],
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function addExtraHost(db: Db, id: string, host: string) {
@@ -249,8 +277,13 @@ export async function acquireCrawl(db: Db, crawlId: string, runnerId: string): P
   return (r.rowCount ?? 0) > 0;
 }
 
-export async function heartbeat(db: Db, crawlId: string, runnerId: string) {
-  await db.query("update crawls set heartbeat_at = now() where id = $1 and runner_id = $2", [crawlId, runnerId]);
+/** Renews the runner's lease. Returns the crawl's status, so a runner learns it was cancelled. */
+export async function heartbeat(db: Db, crawlId: string, runnerId: string): Promise<CrawlStatus | null> {
+  const r = await db.query<{ status: CrawlStatus }>(
+    "update crawls set heartbeat_at = now() where id = $1 and runner_id = $2 returning status",
+    [crawlId, runnerId],
+  );
+  return r.rows[0]?.status ?? null;
 }
 
 export async function finishItem(db: Db, crawlId: string, hash: Buffer, status: "done" | "failed" | "skipped", httpStatus: number | null, reason: string | null) {

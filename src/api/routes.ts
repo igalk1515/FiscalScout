@@ -321,6 +321,32 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
   );
 
   app.post(
+    "/v1/crawls/:id/cancel",
+    {
+      schema: {
+        tags: ["crawls"],
+        summary: "Stop a queued or running crawl",
+        description:
+          "Marks the crawl cancelled and answers 202 at once. Nothing new is fetched; pages already being fetched finish within seconds, then the rest of the queue is skipped and the stream sends crawl.cancelled. What was found stays readable. 409 if the crawl already finished.",
+        params: IdParams,
+        response: { 202: CrawlOut, ...errors, 409: ErrorOut },
+      },
+    },
+    async (req, reply) => {
+      const crawl = await repo.getCrawl(ctx.db, req.params.id);
+      if (!crawl) throw new NotFound("crawl not found");
+      const cancelled = await repo.cancelCrawl(ctx.db, crawl.id);
+      if (!cancelled) throw new Conflict(`the crawl already ended: ${(await repo.getCrawl(ctx.db, crawl.id))!.status}`);
+      // The runner closes the crawl when its workers stop: here, or in the process that holds a
+      // fresh lease. With neither, nothing is running it, so close it now.
+      const here = ctx.runner.cancel(crawl.id);
+      const elsewhere = crawl.runner_id !== null && crawl.heartbeat_at !== null && Date.now() - crawl.heartbeat_at.getTime() < 30_000;
+      if (!here && !elsewhere) await ctx.runner.settleCancelled(crawl.id, crawl.pages_fetched + crawl.pages_failed);
+      return reply.status(202).send(await crawlView(ctx, (await repo.getCrawl(ctx.db, crawl.id))!));
+    },
+  );
+
+  app.post(
     "/v1/crawls/:id/rescore",
     {
       schema: {
@@ -360,7 +386,7 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
         tags: ["crawls"],
         summary: "Live stream of the crawl (Server-Sent Events)",
         description:
-          "text/event-stream. Sends the stored history first, then new events as they happen. Reconnects resume from Last-Event-ID. Event types: crawl.started, page.fetching, page.fetched, page.failed, page.skipped, link.found, contact.found, scope.added, host.paused, stats, crawl.done, crawl.blocked, crawl.failed.",
+          "text/event-stream. Sends the stored history first, then new events as they happen. Reconnects resume from Last-Event-ID. Event types: crawl.started, page.fetching, page.fetched, page.failed, page.skipped, page.rendered, page.render_failed, link.found, contact.found, scope.added, scope.mirror, host.paused, llm.capped, stats, crawl.done, crawl.blocked, crawl.failed, crawl.cancelled, crawl.rescored.",
         params: IdParams,
         querystring: EventsQuery,
       },
@@ -386,7 +412,7 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
       // Subscribe before reading history, so nothing falls between the two.
       const buffered: CrawlEvent[] = [];
       let live = false;
-      const finished = (type: string) => ["crawl.done", "crawl.blocked", "crawl.failed"].includes(type);
+      const finished = (type: string) => ["crawl.done", "crawl.blocked", "crawl.failed", "crawl.cancelled"].includes(type);
       const unsubscribe = ctx.events.subscribe(crawl.id, (e) => {
         if (!live) return void buffered.push(e);
         send(e);
@@ -409,7 +435,7 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
       for (const e of buffered) if (!e.id || e.id > lastId) send(e);
       live = true;
       const current = await repo.getCrawl(ctx.db, crawl.id);
-      if (current && ["done", "blocked", "failed"].includes(current.status) && !ctx.runner.isRunning(crawl.id)) close();
+      if (current && ["done", "blocked", "failed", "cancelled"].includes(current.status) && !ctx.runner.isRunning(crawl.id)) close();
     },
   );
 

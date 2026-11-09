@@ -34,7 +34,7 @@ const Counters = z.object({
   llm_cost_usd: z.number(),
 });
 
-export const CrawlStatusEnum = z.enum(["queued", "running", "done", "blocked", "failed"]);
+export const CrawlStatusEnum = z.enum(["queued", "running", "done", "blocked", "failed", "cancelled"]);
 
 export const CrawlOut = z.object({
   id: z.string().uuid(),
