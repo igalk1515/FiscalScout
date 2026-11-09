@@ -353,7 +353,7 @@ h3[id] { scroll-margin-top: 24px; }
       </div>
 
       <h3>Bozeman · bozeman.net → bozemanmt.gov</h3>
-      <p class="path">This site blocks script clients, so these rows come from search results and need to be confirmed in a browser. The hub is <a href="https://www.bozemanmt.gov/departments/finance/budget-and-financial-reports">Budget and Financial Reports</a>.</p>
+      <p class="path">This site refused the crawler's own User-Agent, so these rows come from search results and need to be confirmed in a browser. Since November 8 the crawler sends a browser User-Agent by default, which the site accepted in direct page fetches; the evaluation results predate that change. The hub is <a href="https://www.bozemanmt.gov/departments/finance/budget-and-financial-reports">Budget and Financial Reports</a>.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Target</th><th>Link text on the site</th><th>Where the file lives</th></tr></thead>
@@ -406,7 +406,8 @@ h3[id] { scroll-margin-top: 24px; }
         <li><strong>A results page with search</strong> over documents and contacts.</li>
         <li><strong>Stopping a crawl</strong>, from the API or a Stop button on the watch page.</li>
         <li><strong>A discount for documents on another government's site.</strong> ASU's finance site links the State of Arizona's budget summaries, which ranked above ASU's own budget.</li>
-        <li><strong>An LLM switch per crawl</strong>, to run on rules alone.</li>
+        <li><strong>Two switches per crawl,</strong> both on by default: respect robots.txt, and use the LLM. With the LLM off, a crawl runs on rules alone.</li>
+        <li><strong>A browser User-Agent by default,</strong> set with <code>HTTP_USER_AGENT</code>, and one retry of a 403 with Node's standard HTTP client.</li>
       </ul>
     </section>
 
@@ -419,7 +420,7 @@ h3[id] { scroll-margin-top: 24px; }
           <tbody>
             <tr><td class="num">0</td><td>Must-find list for the four sites, and the test set</td><td>Every link in "What we look for" and "Test set" behaves the way the table says.</td></tr>
             <tr><td class="num">1</td><td>Project skeleton: docker compose, Postgres, migrations</td><td><code>docker compose up</code>, then <code>\dt</code> lists every table.</td></tr>
-            <tr><td class="num">2</td><td>Fetch one URL politely: robots.txt per RFC 9309, timeouts, size cap, redirects, status handling</td><td>Unit tests built from the RFC's examples pass. A CLI prints the robots decision, status, final URL, size and time for each test site's home page. Bozeman shows as blocked.</td></tr>
+            <tr><td class="num">2</td><td>Fetch one URL politely: robots.txt per RFC 9309, timeouts, size cap, redirects, status handling</td><td>Unit tests built from the RFC's examples pass. A CLI prints the robots decision, status, final URL, size and time for each test site's home page. Bozeman showed as blocked with the crawler's own User-Agent.</td></tr>
             <tr><td class="num">3</td><td>Extract links with anchor, heading and nearby text</td><td>On Ann Arbor's Financial Reporting page, "Fiscal Year 2025" comes out with the heading "Annual Comprehensive Financial Report (ACFR)".</td></tr>
             <tr><td class="num">4</td><td>Rules scoring with configurable keywords</td><td>On the same page, the ACFR and budget links score at least 0.7, and "Poverty Exemptions" scores low.</td></tr>
             <tr><td class="num">5</td><td>Contacts and file details</td><td>Ann Arbor's finance page gives Marti Praschan, Chief Financial Officer, mpraschan@a2gov.org. Boerne gives Wesley Scott with "CPA, RTSBA" kept out of the name. ASU gives Morgan R. Olsen with the title and no email. The FY2025 ACFR link is tagged <code>acfr</code>, 2025.</td></tr>
@@ -458,7 +459,7 @@ h3[id] { scroll-margin-top: 24px; }
             <tr><td>Wrong file behind a link</td><td><a href="https://cfo.asu.edu/financial-reports">ASU "2020" ACFR link</a></td><td>It opens the 2025 file</td><td>Read the year inside the document. The content hash shows that two links share one file.</td><td class="num">13</td></tr>
             <tr><td>Opaque URL</td><td><a href="https://www.leawood.org/DocumentCenter/View/2087">leawood.org/DocumentCenter/View/2087</a></td><td>A 301 to <code>/View/2087/Finance-Director</code></td><td>Resolve it with a HEAD request and score the readable path</td><td class="num">2, 4</td></tr>
             <tr><td>Spreadsheet</td><td><a href="https://www.boerneisd.net/82153_4">Boerne 2026–27 budget, .xlsx</a></td><td>An Excel file next to the PDF</td><td>Treat .xlsx as a document type</td><td class="num">4</td></tr>
-            <tr><td>Blocked by bot protection</td><td><a href="https://bozeman.net/">bozeman.net</a></td><td>Akamai returns 403 to every automated request, even for <code>robots.txt</code> (rechecked November 8)</td><td>Mark the crawl blocked and report it. Never disguise the crawler.</td><td class="num">2</td></tr>
+            <tr><td>Blocked by bot protection</td><td><a href="https://bozeman.net/">bozeman.net</a></td><td>403 to the crawler's own User-Agent, even for <code>robots.txt</code>. A browser User-Agent and Node's standard HTTP client got the page (November 8).</td><td>Send the configured User-Agent, a browser's by default. On a 403, retry once with Node's standard client. If the refusal continues, report the crawl as blocked.</td><td class="num">2</td></tr>
             <tr><td>Platform with an API</td><td><a href="https://webapi.legistar.com/v1/a2gov/events">Legistar for Ann Arbor</a></td><td>Public JSON with agenda PDF links, and no key needed</td><td>A connector instead of crawling</td><td>B</td></tr>
           </tbody>
         </table>
@@ -513,7 +514,7 @@ h3[id] { scroll-margin-top: 24px; }
         <div class="tile">
           <h4>The site's rules</h4>
           <dl class="ab">
-            <dt>A</dt><dd><code>robots.txt</code> per host (Disallow, Crawl-delay), meta robots and <code>X-Robots-Tag</code> nofollow, one request at a time per host and at least a second apart, an honest User-Agent, <code>Retry-After</code> on 429 and 503. Blocked sites are reported, never bypassed.</dd>
+            <dt>A</dt><dd><code>robots.txt</code> per host (Disallow, Crawl-delay), meta robots and <code>X-Robots-Tag</code> nofollow, on by default and switchable per crawl. One request at a time per site, at least a second apart. A browser User-Agent by default, configurable, and one retry of a 403 with Node's standard HTTP client. <code>Retry-After</code> on 429 and 503. A site that keeps refusing is reported as blocked.</dd>
             <dt class="b">B</dt><dd>Same rules, enforced by the worker that owns the host's partition.</dd>
           </dl>
           <a class="more" href="#politeness">Politeness</a>
@@ -652,8 +653,10 @@ h3[id] { scroll-margin-top: 24px; }
       <h3 id="politeness">Politeness</h3>
       <ul class="list">
         <li>Fetch and cache <code>robots.txt</code> per host for 24 hours. Honor <code>Disallow</code> and <code>Crawl-delay</code>. Per RFC 9309, a 4xx for <code>robots.txt</code> means everything is allowed, and a 5xx or no answer means nothing is.</li>
+        <li>Each crawl has a <strong>Respect robots.txt</strong> switch, on by default. It covers robots.txt rules and crawl delays, redirect targets, browser requests, and page and link nofollow. Pacing, scope and page limits apply either way.</li>
         <li>One request at a time per site, at least one second apart, longer when the site answers slowly. A site is a registrable domain: on the first real crawl, three asu.edu subdomains fetched in parallel shared one rate limit and answered 429. A 429 or 503 doubles a per-site backoff, up to a minute; success halves it.</li>
-        <li>Send an honest User-Agent that names the bot and links to a page describing it.</li>
+        <li>Send the configured User-Agent: a desktop Chrome header by default, replaced with <code>HTTP_USER_AGENT</code>. HTTP fetches, robots.txt and the browser all use it, and robots.txt groups are matched on its first product token (<code>Mozilla</code> by default).</li>
+        <li>On a 403, retry once with Node's standard User-Agent, at least a second later, and show it as <code>page.retrying</code> in the live feed. When that client succeeds, the runner keeps using it for that origin. With robots.txt on, the retry also has to be allowed for the standard client.</li>
         <li>Honor <code>&lt;meta name="robots" content="nofollow"&gt;</code> and the <code>X-Robots-Tag</code> header. Links on those pages are not followed.</li>
         <li>On 429 or 503, wait for <code>Retry-After</code>. After repeated 403 or 5xx responses, pause the host and mark the crawl as blocked.</li>
       </ul>
@@ -711,7 +714,7 @@ returning f.url, f.host;
 -- same transaction: lease the site until the fetch is done
 -- after the fetch: next_allowed_at = now() + max(delay, response time, backoff)</code></pre>
       <ul class="list">
-        <li><strong>Retries only when a retry can help:</strong> timeouts, network errors, 5xx and 429. A 4xx such as 404 or 403 is final: the page is marked <code>failed</code> with its status and is not tried again. A retry goes back to <code>queued</code> with <code>not_before</code> pushed out by exponential backoff with jitter, or by <code>Retry-After</code> when the server sends it. After three attempts it becomes <code>failed</code>.</li>
+        <li><strong>Retries only when a retry can help:</strong> timeouts, network errors, 5xx and 429. A 4xx such as 404 is final: the page is marked <code>failed</code> with its status and is not tried again. A 403 gets the one retry with Node's standard client first, and is final after it. A retry goes back to <code>queued</code> with <code>not_before</code> pushed out by exponential backoff with jitter, or by <code>Retry-After</code> when the server sends it. After three attempts it becomes <code>failed</code>.</li>
         <li><strong>Crash safety:</strong> a URL stuck in <code>fetching</code> for more than five minutes returns to the queue.</li>
         <li><strong>Host breaker:</strong> after five errors in a row the host is paused, and the crawl status says so.</li>
       </ul>
@@ -727,7 +730,7 @@ returning f.url, f.host;
             <tr><td>1. Plain HTML</td><td>Always first. JSON embedded in the page (menus and cards that scripts draw) is read too: that is how ASU's CFO is found.</td><td>One request.</td></tr>
             <tr><td>2. Sitemap</td><td>When <code>robots.txt</code> lists one, or <code>/sitemap.xml</code> exists. Gives a list of pages without running anything.</td><td>One or a few requests.</td></tr>
             <tr><td>3. Headless browser</td><td>Only when the HTML looks empty: few links, an empty app root, or navigation built by script. Built, and off by default (<code>RENDER_JS=true</code> turns it on): only pages on the entity's own site that answered 200, at most 20 per crawl. With it off, the page is flagged <code>needs_browser</code> and reported.</td><td><span class="pill cost">Expensive</span> An order of magnitude more CPU and time.</td></tr>
-            <tr><td>4. Mark blocked</td><td>When the site still refuses automated clients.</td><td>Reported in crawl status and in the README.</td></tr>
+            <tr><td>4. Mark blocked</td><td>When the site still refuses after the retry with Node's standard client. Interactive challenges and sign-in pages are not handled.</td><td>Reported in crawl status and in the README.</td></tr>
           </tbody>
         </table>
       </div>
@@ -740,11 +743,11 @@ returning f.url, f.host;
             <tr><td>a2gov.org</td><td>Plain HTML, 105 links on the home page. <code>robots.txt</code> lists a sitemap.</td><td>HTML plus sitemap.</td></tr>
             <tr><td>boerneisd.net</td><td>Plain HTML, 218 links on the home page, two of them direct PDF links.</td><td>HTML.</td></tr>
             <tr><td>asu.edu</td><td>Main navigation is built by JavaScript. The raw HTML has 42 links. No sitemap line in <code>robots.txt</code>.</td><td>The plain HTML still has a way in: the footer link "Jobs" goes to cfo.asu.edu/applicant, which links to Business and Finance and then Financial Reports. Three clicks, no browser. The <code>cfo</code> in the host name is what makes the crawler pick it. Strict page budget, since the site is very large.</td></tr>
-            <tr><td>bozeman.net</td><td>Leads to bozemanmt.gov, where Akamai returns 403 "Access Denied" to a script client. The same page opens normally in a browser.</td><td>Mark it blocked and report it in the crawl status and the README. No fingerprint spoofing.</td></tr>
+            <tr><td>bozeman.net</td><td>Leads to bozemanmt.gov, where Akamai returns 403 "Access Denied" to a script client. The same page opens normally in a browser.</td><td>Send a browser User-Agent by default, which the site accepted on November 8. A 403 gets one retry with Node's standard client, and a continued refusal is reported as blocked.</td></tr>
           </tbody>
         </table>
       </div>
-      <p>Bot protection is a real constraint at Pursuit's scale. The right long-term answer is an identified bot that sites can allow, or another source for the same documents, such as the third-party platforms where many entities publish agendas and budgets.</p>
+      <p>Bot protection is a real constraint at Pursuit's scale. The crawler does not solve interactive challenges or sign in. For a site that still refuses, the answer is another source for the same documents, such as the third-party platforms where many entities publish agendas and budgets.</p>
     </section>
 
     <section id="ranking" aria-labelledby="h-ranking">
@@ -905,7 +908,9 @@ returning f.url, f.host;
   id            uuid primary key,
   seed_url      text not null,
   keywords      jsonb not null,
-  status        text not null,          -- queued | running | done | blocked | failed
+  status        text not null,          -- queued | running | done | blocked | failed | cancelled
+  respect_robots boolean not null default true,
+  use_llm       boolean not null default true,
   pages_fetched int  not null default 0,
   started_at    timestamptz,
   finished_at   timestamptz
@@ -1041,7 +1046,7 @@ create index on crawl_events (crawl_id, id);</code></pre>
         <table>
           <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
           <tbody>
-            <tr><td><code>POST</code></td><td><code>/v1/crawls</code></td><td>Start a crawl with a seed URL, keyword weights, max depth and page budget. <code>max_depth: 0</code> analyzes a single page. Returns 202 with a crawl ID. Accepts an <code>Idempotency-Key</code> header.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/v1/crawls</code></td><td>Start a crawl with a seed URL, keyword weights, max depth and page budget, and two switches, <code>respect_robots</code> and <code>use_llm</code>, both on by default. <code>max_depth: 0</code> analyzes a single page. Returns 202 with a crawl ID. Accepts an <code>Idempotency-Key</code> header.</td></tr>
             <tr><td><code>GET</code></td><td><code>/v1/crawls/{id}</code></td><td>Status (queued, running, done, blocked, failed, cancelled) and counters.</td></tr>
             <tr><td><code>GET</code></td><td><code>/v1/crawls</code></td><td>Recent crawls.</td></tr>
             <tr><td><code>POST</code></td><td><code>/v1/crawls/{id}/cancel</code></td><td>Stop a queued or running crawl. Pages in flight finish, the rest of the queue is skipped, and the status becomes cancelled, which nothing overwrites. 409 if the crawl already ended.</td></tr>
@@ -1363,7 +1368,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
             <tr><td>Rules first, LLM last</td><td>Cost, speed and repeatable results. Every decision records which tier made it.</td><td>Rules need tuning per keyword set.</td></tr>
             <tr><td>One database to start</td><td>No dual writes to keep in sync. Filters and full-text search run in one query.</td><td>Search and storage scale together until the split trigger is reached.</td></tr>
             <tr><td>Store every sighting</td><td>Customers trust a result they can trace. Debugging a bad score starts from its source.</td><td>More rows. Cheap compared with the value.</td></tr>
-            <tr><td>Respect bot protection</td><td>Spoofing a browser fingerprint is evasion, and it puts the company's reputation at risk.</td><td>Some sites stay blocked until there is an allow-list or another source.</td></tr>
+            <tr><td>A browser User-Agent by default, robots.txt switchable per crawl</td><td>Bozeman refused the crawler's own User-Agent and accepted a browser's. robots.txt stays on by default, and the header can be replaced with <code>HTTP_USER_AGENT</code>.</td><td>The header does not name the crawler. Sites that also refuse Node's standard client, or show an interactive challenge, stay blocked.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1377,7 +1382,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
         <li>Which targets matter most to customers: documents, contacts, or both equally?</li>
         <li>How fresh does the data need to be? Days or weeks changes the recrawl budget a lot.</li>
         <li>Are third-party agenda and document platforms in scope, or only the entity's own domain?</li>
-        <li>Bozeman's site blocks every automated request at the network edge, even for <code>robots.txt</code>. Is reporting the block the expected result for that test site?</li>
+        <li>Bozeman refused the crawler's own User-Agent and accepted a browser's. Which User-Agent does Pursuit's crawling send today?</li>
       </ul>
     </section>
   </main>
