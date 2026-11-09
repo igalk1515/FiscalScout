@@ -1,15 +1,15 @@
-# Evaluation · 2026-11-08 23:50 UTC
+# Evaluation · 2026-11-09 03:08 UTC
 
 | Site | Crawl | Must-find | Precision@10 (documents) | Links decided by the LLM |
 |---|---|---|---|---|
-| Ann Arbor | done, 295 pages | 3/3 | 10/10 | 0 of 347 |
-| Boerne ISD | done, 284 pages | 3/3 | 10/10 | 0 of 25 |
-| Arizona State University | done, 290 pages | 3/3 | 8/10 | 0 of 41 |
-| Bozeman | blocked, 0 pages | blocked and reported, as expected | - | - |
+| Ann Arbor | done, 294 pages (`a65c5cee`) | 3/3 | 10/10 | 0 of 347 |
+| Boerne ISD | done, 288 pages (`c05c81cc`) | 3/3 | 10/10 | 0 of 25 |
+| Arizona State University | done, 292 pages (`2add4e1c`) | 3/3 | 7/10 | 0 of 45 |
+| Bozeman | blocked, 0 pages (`ac021cd9`) | blocked and reported, as expected | - | - |
 
 **Must-find recall: 9/9**
 
-Precision@10 counts how many of the ten best-scored documents match a hand-written pattern for finance documents (ACFR, budget, audit, financial report). It is a quick check, not a full labeled set.
+Precision@10 counts how many of the ten best-scored documents name a finance document (ACFR, budget, audit, financial report) in their link text, URL or the heading they sit under, and belong to the entity: documents on hosts listed as someone else's (the State of Arizona's budget office for ASU) never count. It is a quick check, not a full labeled set.
 
 ## Ann Arbor
 
@@ -27,7 +27,7 @@ Top 5 documents:
 ## Boerne ISD
 
 - found: Annual Financial Report FY2025 (rank 1 of 5 acfr documents, score 0.92)
-- found: Adopted budget 2026-27 (rank 1 of 8 budget documents, score 0.98)
+- found: Adopted budget 2026-27 (rank 1 of 9 budget documents, score 0.98)
 - found: Chief Financial Officer (Wesley Scott · Chief Financial Officer · wesley.scott@boerneisd.net · score 0.85)
 
 Top 5 documents:
@@ -40,15 +40,15 @@ Top 5 documents:
 ## Arizona State University
 
 - found: ACFR 2026 (rank 1 of 8 acfr documents, score 0.68)
-- found: Operating budget FY2027 (Board of Regents SharePoint) (rank 7 of 12 budget documents, score 0.60)
-- found: Executive Vice President, Treasurer and CFO (Morgan R. Olsen · Executive vice president, treasurer and chief financial officer · no email · score 0.63)
+- found: Operating budget FY2027 (Board of Regents SharePoint) (rank 7 of 15 budget documents, score 0.60)
+- found: Executive Vice President, Treasurer and CFO (Morgan R. Olsen · Executive Vice President, Treasurer and CFO · no email · score 0.63)
 
 Top 5 documents:
-- 0.95 budget 2027 FY 2027 Executive Budget Summary <https://ospb.az.gov/sites/default/files/2026-01/executive-budget-summary-fy-2027.pdf>
-- 0.95 budget 2026 FY 2026 Executive Budget Summary <https://ospb.az.gov/sites/default/files/2026-01/FY%202026%20Budget%20Summary.pdf>
-- 0.87 budget 2025 FY 2025 Executive Budget Summary <https://ospb.az.gov/sites/default/files/2026-01/FY%202025%20Budget%20Summary.pdf>
+- 0.71 budget 2027 FY 2027 Executive Budget Summary <https://ospb.az.gov/sites/default/files/2026-01/executive-budget-summary-fy-2027.pdf> (not the entity's)
+- 0.71 budget 2026 FY 2026 Executive Budget Summary <https://ospb.az.gov/sites/default/files/2026-01/FY%202026%20Budget%20Summary.pdf> (not the entity's)
 - 0.70 budget 2028 FY 2028 Legislative Budget Request — ABS <https://www.asu.edu/pb/documents/FY28-LBR.pdf>
 - 0.70 budget 2027 FY 2027 Legislative Budget Request — ABS <https://www.asu.edu/pb/documents/FY27-LBR.pdf>
+- 0.70 budget 2026 FY 2026 Legislative Budget Request — ABS <https://www.asu.edu/pb/documents/FY26-LBR.pdf>
 
 ## Bozeman
 

@@ -16,24 +16,41 @@ every crawl.
 - **REST API** with OpenAPI docs, keyset pagination and one error shape, plus a
   Server-Sent Events stream and a watch page that shows each crawl live.
 
-The design behind it, including the version for millions of pages a day, is in
-[docs/design.html](docs/design.html). How each build step was checked is in
-[docs/build-log.md](docs/build-log.md).
+- **Running it at millions of pages a day:** [docs/scaling.md](docs/scaling.md), with numbers
+  measured on the test crawls and what would break first.
+- **How each build step was checked, and what the real sites taught:** [docs/build-log.md](docs/build-log.md).
+- **The plan written before the build:** [docs/design.html](docs/design.html) (open it in a browser).
 
 ---
 
 ## Results on the test sites
 
-Each site crawled from its home page, depth 3, 300 pages. The must-find list
-([eval/must-find.json](eval/must-find.json)) was built by hand before the crawler ran. A target
-counts as found when it is in the top 10 of its type. Run it yourself with `npm run eval`.
+**How it was measured:**
+- **One final run on the final code, with the default settings.** Each site was crawled once
+  from its home page: depth 3, a page budget of 300, the LLM on (`gpt-4o-mini`) and browser
+  rendering off.
+- **The same crawls, ranked twice:** once with the LLM and once with rules alone.
+- **A hand-made must-find list.** [eval/must-find.json](eval/must-find.json) was built before the
+  crawler ran. A target counts as found when it is in the top 10 of its type.
+- **Precision@10:** how many of the ten best documents name a finance document (in the link
+  text, the URL or the heading above the link) and belong to the entity.
 
-| Site | Crawl | Must-find (rules only) | Must-find (with LLM) | Precision@10, documents |
-|---|---|---|---|---|
-| Ann Arbor (a2gov.org) | 295 pages | 3/3 | 3/3 | 10/10 |
-| Boerne ISD (boerneisd.net) | 284 pages | 3/3 | 3/3 | 10/10 |
-| Arizona State University (asu.edu) | 290 pages | 3/3 | 3/3 | 8/10 |
-| Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - |
+Run it yourself with `npm run eval -- --run`.
+
+| Site | Crawl | Must-find, rules only | Must-find, with LLM | Precision@10, rules only | Precision@10, with LLM |
+|---|---|---|---|---|---|
+| Ann Arbor (a2gov.org) | 294 pages | 3/3 | 3/3 | 10/10 | 10/10 |
+| Boerne ISD (boerneisd.net) | 288 pages | 3/3 | 3/3 | 10/10 | 10/10 |
+| Arizona State University (asu.edu) | 292 pages | 3/3 | 3/3 | 7/10 | 10/10 |
+| Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - | - |
+
+**Why ASU is 7/10 with rules alone.** ASU's finance site also links the State of Arizona's
+budget summaries. A document on another government's site gets × 0.75, so with the LLM, ASU's
+own reports and budgets fill the top 10, and the state's summaries come 11th and 12th. With
+rules alone, the state's two summaries still lead at 0.71. ASU's own documents score lower:
+their budgets are labeled only "FY 2027", and its ACFR scores 0.68, which is in the band the
+rules hand to the LLM. The LLM confirms them. This is the cascade doing what it was designed to
+do.
 
 What it found, first in each list:
 
@@ -48,13 +65,56 @@ Two details worth knowing: ASU's finance site is reached without a browser throu
 called "Jobs" (the host name `cfo.asu.edu` carries the signal), and ASU's CFO is read from JSON
 embedded in the page, because the card is drawn by a script.
 
-Beyond the CFO, Boerne's crawl also returns the rest of the finance office, ranked below him:
-the purchasing director, the payroll manager, the assistant director of business services and
-the payroll specialists, each with an email checked against the page.
+Beyond the CFO, Boerne's crawl also returns the rest of the finance office, ranked below the
+CFO. Each one has an email checked against the page:
+- the purchasing director;
+- the payroll manager;
+- the assistant director of business services;
+- the payroll specialists.
 
-The first LLM run of all three sites cost **$0.025** with `gpt-4o-mini`; the latest rerun cost
-$0.013, because answers seen before come from the cache. Full details:
-[eval/results.md](eval/results.md) (with LLM) and [eval/results-rules-only.md](eval/results-rules-only.md).
+ASU's crawl returns 48 people from its finance offices.
+
+**LLM cost:** the first LLM run over all three sites cost **$0.025** with `gpt-4o-mini`. The
+final run cost $0.002, because answers seen before come from the cache.
+
+**Full details:** [eval/results.md](eval/results.md) (with the LLM) and
+[eval/results-rules-only.md](eval/results-rules-only.md).
+
+---
+
+## What I prioritized, and what I left out
+
+The brief says that prioritizing is part of the task. I built in this order, and each step was
+checked on the real test sites before the next one started:
+
+1. **Ranking the links on one page.** This is the objective: find budgets, ACFRs and finance
+   contacts and score them, with keywords and weights set per crawl.
+2. **Storage and the API** that the brief asks for: a schema built for volume, and a REST API
+   with OpenAPI docs.
+3. **A focused, polite crawler.** It only feeds pages to the ranker, so it spends its page
+   budget on the most promising links first.
+4. **An LLM only where the rules are unsure.** This keeps cost and latency low, and the system
+   runs without a key.
+5. **Evaluation:** a must-find list written by hand before the crawler ran, so "it works" is a
+   number.
+6. **A live view of each crawl.** It made debugging on real sites fast, and it shows how the
+   crawler decides.
+7. **Then the details the real sites asked for:**
+   - adjustable keywords, re-ranking and search;
+   - the rest of the finance office as contacts;
+   - mirror hosts, broken links and stopping a crawl;
+   - an opt-in browser for pages drawn by scripts.
+
+**Left out on purpose.** All of these matter at scale, but they add little to four test sites.
+Each one is described in [docs/scaling.md](docs/scaling.md):
+- distributed queues, an object store and a recrawl scheduler;
+- reading the text inside documents (OCR) and a search index for it;
+- a classifier trained on the LLM's answers;
+- authentication, rate limits and network restrictions on the API. Run it on a trusted
+  network.
+
+**Not done, by choice:** getting past bot protection. Bozeman blocks automated requests, so
+the crawl reports the block.
 
 ---
 
@@ -111,9 +171,12 @@ Other commands:
 | `npm run analyze -- page.html --url <original url>` | The same, offline, on a saved page |
 | `npm run crawl -- <url> --depth 3 --budget 300` | One crawl from the command line |
 | `npm run rescore -- <crawl-id> [--llm]` | Re-rank a finished crawl from the saved pages, without fetching (after a rule change) |
+| `npm run eval -- --run [--out file]` | Crawl the four test sites, then measure them |
 
 Settings (all optional) are in [.env.example](.env.example): `OPENAI_API_KEY`, `OPENAI_MODEL`,
-`LLM_MAX_USD_PER_CRAWL`, `CRAWL_WORKERS`, `MIN_HOST_DELAY_MS`, `DATABASE_URL`, `RAW_DIR`.
+`LLM_MAX_USD_PER_CRAWL`, `CRAWL_WORKERS`, `MIN_HOST_DELAY_MS`, `DATABASE_URL`, `RAW_DIR`, and for
+the render tier `RENDER_JS`, `RENDER_MAX_PER_CRAWL`, `RENDER_TIMEOUT_MS`, `BROWSER_CHANNEL`,
+`BROWSER_EXECUTABLE`.
 
 ---
 
@@ -145,6 +208,7 @@ that produced it.
 | Document file | PDF, Excel, Word; SharePoint `/:b:/` links count as PDF | +0.15 |
 | A page on another platform named for the document | ClearGov budget viewer | +0.10 |
 | A page on the entity's own site named for a document | usually the list of documents | −0.15 |
+| A document on another government's site (`.gov`, `.mil`, state and local `.us`) | the state's budget summary, linked from a university | × 0.75 |
 | Found on a page with a high path score | | +0.10 × parent's path score |
 | Draft | `acfr-2023_draft.pdf` | −0.15 |
 | A paper about the document | "FY27 Budget Responses", hearing notices, agendas | −0.20 |
@@ -198,9 +262,12 @@ or a whole site. The answer must match a strict JSON schema and is validated in 
 are cached by input, so a rerun costs nothing. If the call fails, the rules score stays. With no
 `OPENAI_API_KEY`, the tier is off.
 
-After the LLM answers, the same multipliers as the rules still apply (older fiscal years, drafts,
-and pages on the entity's own site, which are nearly always the list rather than the document),
-so the LLM confirms what a link is without flattening the ranking.
+After the LLM answers, the same multipliers as the rules still apply, so the LLM confirms what a
+link is without flattening the ranking:
+- older fiscal years;
+- drafts;
+- documents on another government's site;
+- pages on the entity's own site, which are nearly always the list rather than the document.
 
 **Cost.** `gpt-4o-mini` by default. A crawl of the three reachable test sites (about 900 pages)
 cost a few cents. `LLM_MAX_USD_PER_CRAWL` (default $0.50) is a hard cap: past it, the crawl
@@ -289,6 +356,7 @@ Interactive docs: http://localhost:3000/docs (OpenAPI JSON at `/docs/json`).
 | `GET` | `/v1/links/{id}` | One link with every place it was found |
 | `GET` | `/v1/contacts` | Contacts, with the page and the text each was checked against. Filters: `q` (words in the name, title or email), `keyword` (a keyword group such as `finance director`, or a term such as `purchasing`), `title`, `min_score` |
 | `GET` | `/v1/keywords` | The default keyword groups, to start from |
+| `POST` | `/v1/crawls/{id}/cancel` | Stop a queued or running crawl. Answers 202. Nothing new is fetched, pages in flight finish, and what was found stays readable. 409 if it already ended |
 | `POST` | `/v1/crawls/{id}/rescore` | Re-rank a finished crawl with new `keywords` from its saved pages; `llm: true` runs the LLM tier too. 409 while the crawl is running |
 | `GET` | `/results/{id}` | Results page: search, filters, keyword editor, re-rank |
 | `GET` | `/live/{id}` | Watch page for a crawl |
@@ -390,11 +458,16 @@ Errors always look like this:
 
 ### Live view
 
-Every step of a crawl is an event: `page.fetching`, `page.fetched`, `page.failed`,
-`page.skipped` (with the reason), `link.found`, `contact.found`, `scope.added`, `scope.mirror`, `host.paused`,
-`stats`, and `crawl.done`, `crawl.blocked` or `crawl.failed`. Events are stored in
-`crawl_events` and pushed to open streams. They also go out on a Postgres `NOTIFY` channel, so
-a crawl started from the command line shows up live in the API's watch page.
+Every step of a crawl is an event:
+- pages: `page.fetching`, `page.fetched`, `page.failed`, `page.skipped` (with the reason),
+  `page.rendered`, `page.render_failed`;
+- results: `link.found`, `contact.found`;
+- crawl decisions: `scope.added`, `scope.mirror`, `host.paused`, `llm.capped`, `stats`;
+- the end: `crawl.done`, `crawl.blocked`, `crawl.failed` or `crawl.cancelled`.
+
+Events are stored in `crawl_events` and pushed to open streams. They also go out on a Postgres
+`NOTIFY` channel, so a crawl started from the command line shows up live in the API's watch
+page. The watch page has a **Stop crawl** button.
 
 ```bash
 curl -N http://localhost:3000/v1/crawls/<id>/events
@@ -423,7 +496,7 @@ raw pages are gzip files on disk keyed by URL hash, outside the database.
 
 ## Tests
 
-`npm test` runs 120+ tests:
+`npm test` runs 138 tests:
 
 - **Unit:** URL normalization and scope, trap guards, the RFC 9309 examples, the fetcher (redirects,
   loops, size cap, timeouts, retry rules), keyword matching, fiscal years, rules scoring and
@@ -432,7 +505,8 @@ raw pages are gzip files on disk keyed by URL hash, outside the database.
   case (robots.txt, traps, a flaky page, a 404, a redirect, an opaque document URL, a contact,
   a blocked site), checking that no host ever gets two requests at once; and the API end to end,
   including validation, idempotency, pagination, full-text search and the SSE stream; a site
-  served under two host names (mirror detection); and the render tier against a site drawn
+  served under two host names (mirror detection); stopping a crawl, including one that runs in
+  a second runner sharing only the database; and the render tier against a site drawn
   entirely by scripts, with a robots.txt rule for a data URL, a bot-check page and a refused page.
   The render tests use a browser already on the machine and are skipped without one.
 
@@ -448,28 +522,48 @@ in [eval/must-find.json](eval/must-find.json) and writes [eval/results.md](eval/
 - **Pages drawn entirely by scripts** are read only with the render tier on, and only on the
   entity's own site. The ClearGov budget viewer sits on ClearGov's host, so it stays a ranked
   link flagged `needs_browser`. Links that scripts open on click (no `href`) are not followed.
-- **Scanned PDFs** are not read. Documents are ranked by their link, not their content.
+- **Scanned PDFs** are not read. Documents are ranked by their link, not their content, so
+  search covers link text and URLs, not the text inside a document.
 
 ## At scale
 
-The version for millions of pages a day (host-partitioned queues, separate fetch, browser and
-parse pools, an object store, a Bloom-filter seen set, recrawl scheduling, a search index over
-document text) is written up in [docs/design.html](docs/design.html), Design B.
+[docs/scaling.md](docs/scaling.md) covers running this at one to three million pages a day. It
+starts from numbers measured on the test crawls:
+
+| Measure | Value |
+|---|---|
+| Pages per second, one site | 0.2–0.7 |
+| Frontier rows per page | 5–12 |
+| Gzipped page | 30 KB |
+| Pages that need a browser | 5.5% |
+| LLM cost per 1,000 pages | under $0.03 |
+
+It then lists what would break first:
+1. the frontier table;
+2. vendor hosts shared by thousands of entities;
+3. the LLM call inside the worker;
+4. raw pages on local disk;
+5. per-page events;
+6. the API and the crawler sharing a process.
+
+It ends with recrawl scheduling by the fiscal calendar, sites that block bots, and when to split
+storage.
 
 ## Project layout
 
 ```
 src/
   api/          Fastify server, routes, Zod schemas
-  crawler/      url, robots, fetcher, extract, runner (the crawl loop), rawstore
-  ranking/      keywords, rules, fileinfo, contacts, llm
+  crawler/      url, robots, fetcher, extract, runner (the crawl loop), render (browser tier),
+                rescore (re-rank from saved pages), rawstore
+  ranking/      keywords, rules, fileinfo, contacts, llm, tier (when the LLM decides)
   store/        SQL for crawls, frontier, links, contacts
-  cli/          fetch-one, analyze, crawl, eval
+  cli/          fetch-one, analyze, crawl, rescore, eval, test-sites
   events.ts     event bus (crawl_events + NOTIFY)
   app.ts        wiring
-public/         watch page and start page
-migrations/     SQL schema
+public/         start page, watch page, results page, keyword editor (keywords.js)
+migrations/     SQL schema, one file per change
 test/           unit and integration tests, saved pages in test/fixtures
 eval/           must-find list and results
-docs/           design and build log
+docs/           scaling, build log, the plan written before the build
 ```

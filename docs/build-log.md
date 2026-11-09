@@ -290,6 +290,77 @@ Writing the re-rank test found an older bug: a re-rank scored an opaque document
 (`/DocumentCenter/View/77`) as a page again, losing what the crawl learned by fetching it. The
 re-rank now keeps the file type the crawl learned.
 
+## Final pass (Nov 8, night)
+
+I read the brief once more against the code. Four gaps came up, and all four are now closed.
+
+**1. The scale write-up was not where a reviewer would read it.**
+- **Problem:** it lived in the HTML plan, which GitHub shows as source code.
+- **Fix:** [scaling.md](scaling.md) replaces it, rewritten from the numbers the final test
+  crawls measured. Those numbers include rows per page, the speed of one site and the raw page
+  size, plus what would break first.
+
+**2. A crawl could not be stopped.**
+- **Problem:** earlier in the day one crawl had to be stopped by hand in the database.
+- **Fix:** `POST /v1/crawls/{id}/cancel`, plus a Stop button on the watch page.
+- **How a stop works:** the runner stops claiming, lets pages in flight finish, skips the rest
+  of the queue and announces `crawl.cancelled` once. A runner in another process learns of the
+  stop from its heartbeat. A cancelled status is final: a crawl that finishes at the same moment
+  cannot overwrite it.
+- **Tests:** a crawl runs in a second runner that shares only the database, and is stopped
+  through the first runner's API. The test fails if the heartbeat check is removed.
+- **A bug found in a real browser:** clicking Stop on the live server showed the watch page
+  still counting queued pages after the stop. The final counters had gone out before the queue
+  was skipped. The order is fixed, and a test checks it.
+
+**3. ASU ranked the State of Arizona's budgets above its own.**
+- **Problem:** `cfo.asu.edu` links the Governor's budget summaries on `ospb.az.gov`. They say
+  "Budget" in the link text, so they scored 1.00 and took three of the top five places. ASU's
+  own budget is labeled only "FY 2027", and it came sixth.
+- **Fix:** a document on another government's site (`.gov`, `.mil`, state and local `.us`) now
+  gets × 0.75, in the rules and again after the LLM. With the LLM, ASU's top 10 is now all its
+  own documents, and the state's summaries come 11th and 12th. Ann Arbor's ranking did not
+  change.
+- **Also discounted:** the State of Arizona's 2021 single audit on `azauditor.gov`. It covers
+  ASU, but it is the state's document. It stays in the list, lower down.
+- **The eval was wrong in both directions.** Precision@10 matched only the link text, so it
+  counted the state's summaries as hits and missed ASU's budgets. It now also reads the heading
+  above each link. It never counts a host listed as someone else's
+  ([must-find.json](../eval/must-find.json)).
+
+**4. The results came from different crawls.** One of them was crawled with the browser on.
+
+### The final run
+
+One final run on the final code, with the default settings: depth 3, a page budget of 300,
+`gpt-4o-mini`, and browser rendering off. Ann Arbor, Boerne and ASU were each crawled once,
+then ranked twice, with the LLM and with rules alone.
+
+| | With LLM | Rules only |
+|---|---|---|
+| Must-find | 9/9 | 9/9 |
+| Precision@10 | 10/10 at all three sites | 10/10 at Ann Arbor and Boerne, 7/10 at ASU |
+| LLM cost | $0.002 (mostly cache) | none |
+
+Bozeman was reported as blocked.
+
+**Why ASU is 7/10 with rules alone:** the state's two summaries still lead, at 0.71. ASU's own
+ACFR scores 0.68 by rules, which is in the band that goes to the LLM, and the LLM is what lifts
+it.
+
+### Moved
+
+The repository moved to `C:\Users\user\Desktop\peronProjects\high-value-link-scraper`.
+
+The first attempt stopped halfway. The database container had the old `docker/initdb` folder
+mounted, which blocked moving the folder in one step. The fix:
+1. Stop the container. The data lives in a named volume, so it was not affected.
+2. Move the remaining folders one by one.
+3. Check that every folder's file count matches and that `git fsck` is clean.
+4. Recreate the container from the new path.
+
+All 19 crawls were still there afterwards.
+
 ## Not done
 
 - **GitHub:** creating the public repository was refused by the permission system on this
