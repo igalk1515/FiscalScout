@@ -119,8 +119,20 @@ export const LinkQuery = z.object({ crawl_id: z.string().uuid().optional() });
 
 export const ContactsQuery = crawlOrHost({
   min_score: z.coerce.number().min(0).max(1).default(0),
+  q: z.string().min(2).optional().describe("Words to find in the name, title or email, e.g. payroll or scott"),
+  keyword: z.string().optional().describe("Contacts matched by this keyword group or term, e.g. finance director or purchasing"),
   title: z.string().optional().describe("Part of the title, e.g. financial"),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const RescoreBody = z.object({
+  keywords: KeywordsSchema.optional().describe("New keyword groups and weights. Omit to re-rank with the crawl's own keywords."),
+  llm: z.boolean().default(false).describe("Run the LLM tier too. Answers seen before come from the cache; new ones cost a little."),
+});
+
+export const RescoreOut = z.object({
+  crawl: CrawlOut,
+  rescored: z.object({ pages: z.number(), links: z.number(), contacts: z.number(), ms: z.number() }),
 });
 
 export const ContactOut = z.object({

@@ -6,7 +6,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../src/api/server.js";
 import { type AppContext, createContext } from "../src/app.js";
 import type { Db } from "../src/db/client.js";
+import { urlHash } from "../src/crawler/url.js";
+import { DEFAULT_KEYWORDS } from "../src/ranking/keywords.js";
 import { createLlm, memoryCache } from "../src/ranking/llm.js";
+import { RANKER_VERSION } from "../src/ranking/rules.js";
+import * as repo from "../src/store/repo.js";
 import { startCitySite } from "./helpers/city-site.js";
 import { silentLog, testDb } from "./helpers/db.js";
 
@@ -190,5 +194,75 @@ describe("GET /v1/crawls/:id/events", () => {
     const restIds = [...rest.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1]));
     expect(restIds[0]).toBeGreaterThan(mid);
     expect(restIds).toEqual(ids.filter((i) => i > mid));
+  });
+});
+
+describe("searching results and adjusting keywords", () => {
+  it("GET /v1/keywords returns the defaults, with the related titles of the contact group", async () => {
+    const res = await app.inject({ url: "/v1/keywords" });
+    expect(res.statusCode).toBe(200);
+    const d = res.json().default;
+    expect(Object.keys(d)).toEqual(expect.arrayContaining(["acfr", "budget", "finance director"]));
+    expect(d["finance director"].related).toEqual(expect.arrayContaining(["payroll", "purchasing"]));
+  });
+
+  it("GET /v1/contacts searches the name, title and email, and filters by keyword group", async () => {
+    const ask = async (qs: string) => (await app.inject({ url: `/v1/contacts?crawl_id=${crawlId}&${qs}` })).json().data.map((c: { name: string }) => c.name);
+    expect(await ask("q=jane")).toEqual(["Jane Doe"]);
+    expect(await ask("q=doe+finance")).toEqual(["Jane Doe"]); // every word must match somewhere
+    expect(await ask("q=jdoe%40example")).toEqual(["Jane Doe"]);
+    expect(await ask("q=payroll")).toEqual([]);
+    expect(await ask("keyword=finance+director")).toEqual(["Jane Doe"]);
+    expect(await ask("keyword=budget")).toEqual([]);
+  });
+
+  it("GET /v1/links?keyword= matches the keyword group, not only the exact word", async () => {
+    const res = await app.inject({ url: `/v1/links?crawl_id=${crawlId}&keyword=acfr&type=document` });
+    const urls = res.json().data.map((d: { url: string }) => d.url);
+    expect(urls.some((u: string) => u.endsWith("city-acfr-2025.pdf"))).toBe(true);
+  });
+
+  it("POST /v1/crawls/:id/rescore re-ranks from saved pages with new weights, and keeps them", async () => {
+    const before = (await app.inject({ url: `/v1/links?crawl_id=${crawlId}&doc_type=budget&min_score=0.5` })).json().data;
+    expect(before.length).toBeGreaterThan(0);
+    // Budget no longer counts: budgets drop out, the ACFR stays.
+    const keywords = { ...DEFAULT_KEYWORDS, budget: { ...DEFAULT_KEYWORDS.budget!, weight: 0 } };
+    const res = await app.inject({ method: "POST", url: `/v1/crawls/${crawlId}/rescore`, payload: { keywords } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().rescored.pages).toBeGreaterThan(5);
+    expect(res.json().crawl.keywords.budget.weight).toBe(0);
+    const after = (await app.inject({ url: `/v1/links?crawl_id=${crawlId}&doc_type=budget&min_score=0.5` })).json().data;
+    expect(after).toHaveLength(0);
+    const acfr = (await app.inject({ url: `/v1/links?crawl_id=${crawlId}&doc_type=acfr&min_score=0.5` })).json().data;
+    expect(acfr.length).toBeGreaterThan(0);
+    // And back to the defaults: the budgets return.
+    await app.inject({ method: "POST", url: `/v1/crawls/${crawlId}/rescore`, payload: { keywords: DEFAULT_KEYWORDS } });
+    const back = (await app.inject({ url: `/v1/links?crawl_id=${crawlId}&doc_type=budget&min_score=0.5` })).json().data;
+    expect(back.map((d: { url: string }) => d.url).sort()).toEqual(before.map((d: { url: string }) => d.url).sort());
+  });
+
+  it("answers 409 for a crawl that is still running, 400 for bad keywords", async () => {
+    const seed = "http://running.example/";
+    const { crawl } = await repo.createCrawl(
+      db,
+      { seedUrl: seed, keywords: DEFAULT_KEYWORDS, maxDepth: 1, pageBudget: 5, scopeDomain: "running.example", rankerVersion: RANKER_VERSION, idempotencyKey: null },
+      { hash: urlHash(seed), host: "running.example" },
+    );
+    await repo.setCrawlStatus(db, crawl.id, "running");
+    const busy = await app.inject({ method: "POST", url: `/v1/crawls/${crawl.id}/rescore`, payload: {} });
+    expect(busy.statusCode).toBe(409);
+    expect(busy.json().error.code).toBe("conflict");
+    await repo.setCrawlStatus(db, crawl.id, "failed", "test crawl");
+    const bad = await app.inject({ method: "POST", url: `/v1/crawls/${crawlId}/rescore`, payload: { keywords: { budget: { weight: 3 } } } });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it("serves the results page and the keyword editor, and nothing else from /assets", async () => {
+    expect((await app.inject({ url: `/results/${crawlId}` })).body).toContain("Keywords and weights");
+    const js = await app.inject({ url: "/assets/keywords.js" });
+    expect(js.statusCode).toBe(200);
+    expect(js.headers["content-type"]).toMatch(/javascript/);
+    expect((await app.inject({ url: "/assets/..%2Fpackage.json" })).statusCode).toBe(404);
+    expect((await app.inject({ url: "/assets/index.html" })).statusCode).toBe(404);
   });
 });

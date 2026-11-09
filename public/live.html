@@ -50,6 +50,7 @@
   <h1 id="seed">Loading…</h1>
   <span id="status" class="pill">…</span>
   <span id="elapsed" class="muted"></span>
+  <a id="results" href="#">Search results</a>
   <a id="api" class="muted" href="#">JSON</a>
 </header>
 <div id="detail" class="detail"></div>
@@ -134,6 +135,7 @@
 
   async function init() {
     $("api").href = `/v1/crawls/${id}`;
+    $("results").href = `/results/${id}`;
     const crawl = await fetch(`/v1/crawls/${id}`).then((r) => r.json());
     if (crawl.error) { $("seed").textContent = crawl.error.message; return; }
     document.title = "Live: " + shortUrl(crawl.seed_url);

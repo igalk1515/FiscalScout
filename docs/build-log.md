@@ -263,6 +263,33 @@ page has almost no content of its own; a test covers the case. Rendered again, t
 Docker: the default image stays 346 MB; with the browser it is 1.48 GB, and a script-built page
 renders inside the container.
 
+An ASU crawl Igal started with the render tier on showed two wastes: policy.asu.edu was rendered
+five times (many links redirect to it) and the single-sign-on page five more. Each page is now
+rendered once, copies are not rendered, and sign-in pages never are; a test with a redirect to
+a sign-in page checks it, and fails without the rule. A 429 inside the browser was reported and
+not bypassed, as designed, and now also slows the crawl down. The crawl still found 3 of 3.
+
+## Adjustable keywords and search (Nov 8, evening)
+
+Igal pointed out that the brief asks for adjustable keyword prioritization, and the only way to
+adjust keywords was a JSON body in the API; there was no way to search results from a page.
+
+- The start page has a keyword editor: one card per group with kind, a weight slider, synonyms
+  and, for contacts, related titles.
+- `POST /v1/crawls/{id}/rescore` ranks a finished crawl again from its saved pages with new
+  keywords, and keeps them on the crawl. Rules only by default, so it costs nothing; 10 to 40
+  seconds for 300 pages. A test sets the budget weight to 0, checks that budgets drop out and
+  the ACFR stays, then sets it back and gets the same budgets.
+- A results page (`/results/{id}`) searches documents (words, keyword, type, year, score) and
+  contacts (name, title or email; keyword group; score), and holds the keyword editor with a
+  re-rank button.
+- `/v1/contacts` takes `q` and `keyword`; a contact now records its keyword group next to the
+  matched term, so "finance director" lists the whole finance office.
+
+Writing the re-rank test found an older bug: a re-rank scored an opaque document URL
+(`/DocumentCenter/View/77`) as a page again, losing what the crawl learned by fetching it. The
+re-rank now keeps the file type the crawl learned.
+
 ## Not done
 
 - **GitHub:** creating the public repository was refused by the permission system on this

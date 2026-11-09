@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crawl results</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --surface: #fff; --fg: #18202b; --muted: #5d6878; --line: #dde2e9;
+    --accent: #1d5fa8; --ok: #217047; --warn: #9b5c00; --bad: #b42318; --chip: #eef2f7;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e131a; --surface: #151c26; --fg: #e3e8ef; --muted: #98a3b3; --line: #273140;
+            --accent: #7fb2ec; --ok: #6cc796; --warn: #f0b45e; --bad: #f08a80; --chip: #1d2733; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 18px 16px 6px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0; word-break: break-all; }
+  .pill { font: 600 11px/1 system-ui; letter-spacing: .05em; text-transform: uppercase; padding: 5px 8px; border-radius: 99px; border: 1px solid var(--line); }
+  .pill.running, .pill.queued { color: var(--accent); border-color: var(--accent); }
+  .pill.done { color: var(--ok); border-color: var(--ok); }
+  .pill.blocked, .pill.failed { color: var(--bad); border-color: var(--bad); }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .page { max-width: 1280px; margin: 0 auto; padding: 8px 16px 32px; display: grid; gap: 14px; }
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+  section > h2, details > summary { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  details > summary { cursor: pointer; list-style-position: inside; }
+  details:not([open]) > summary { border-bottom: 0; }
+  .body { padding: 12px; }
+  .cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .filters .wide { grid-column: span 2; }
+  @media (max-width: 520px) { .filters .wide { grid-column: 1 / -1; } }
+  .filters label { font-size: 11.5px; color: var(--muted); display: grid; gap: 3px; }
+  input, select { font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; min-width: 0; }
+  button.primary { font: 600 13.5px system-ui; padding: 8px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.primary:disabled { opacity: .55; cursor: default; }
+  button.more { font: 600 13px system-ui; padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); cursor: pointer; margin: 10px 12px; }
+  .rerank { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .rerank label { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .rerank input[type=checkbox] { width: auto; }
+  #rerank-status { font-size: 13px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+  ol { list-style: none; margin: 0; padding: 0; }
+  li.item { padding: 10px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 3px; }
+  li.item:last-child { border-bottom: 0; }
+  .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+  .score { font: 600 12px var(--mono); padding: 2px 6px; border-radius: 4px; background: var(--chip); color: var(--fg); }
+  .chip { padding: 1px 6px; border-radius: 4px; background: var(--chip); }
+  .title { font-weight: 600; word-break: break-word; }
+  .why { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .src { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .empty { padding: 12px; color: var(--muted); }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="seed">Loading…</h1>
+  <span id="status" class="pill">…</span>
+  <a href="/">All crawls</a>
+  <a id="live" href="#">Live view</a>
+  <a href="/docs" class="muted">API</a>
+</header>
+<div class="page">
+  <details id="kw-box">
+    <summary>Keywords and weights</summary>
+    <div class="body">
+      <p class="hint">Change what counts and how much, then re-rank. Every page this crawl saved is ranked again from disk: nothing is fetched, and without the LLM it costs nothing.</p>
+      <div id="kw"></div>
+      <div class="rerank">
+        <button class="primary" id="rerank">Re-rank from saved pages</button>
+        <label><input type="checkbox" id="use-llm"> Use the LLM too (costs a little)</label>
+        <span id="rerank-status" class="muted"></span>
+      </div>
+    </div>
+  </details>
+
+  <div class="cols">
+    <section>
+      <h2>Documents and pages</h2>
+      <div class="filters">
+        <label class="wide">Search<input id="d-q" type="search" placeholder="Words in the link text or URL, e.g. single audit"></label>
+        <label>Keyword<select id="d-kw"><option value="">All</option></select></label>
+        <label>Type<select id="d-type"><option value="document">Documents</option><option value="page">Pages</option><option value="">All</option></select></label>
+        <label>Fiscal year<input id="d-fy" type="number" min="1990" max="2100" placeholder="Any"></label>
+        <label>Min score<select id="d-min"><option value="0">0</option><option value="0.3">0.3</option><option value="0.5" selected>0.5</option><option value="0.7">0.7</option></select></label>
+      </div>
+      <ol id="docs"></ol>
+      <div id="docs-empty" class="empty" hidden>Nothing matches.</div>
+      <button class="more" id="docs-more" hidden>Load more</button>
+    </section>
+
+    <section>
+      <h2>Contacts</h2>
+      <div class="filters">
+        <label class="wide">Search<input id="c-q" type="search" placeholder="Name, title or email, e.g. payroll"></label>
+        <label>Keyword<select id="c-kw"><option value="">All</option></select></label>
+        <label>Min score<select id="c-min"><option value="0" selected>0</option><option value="0.3">0.3</option><option value="0.5">0.5</option><option value="0.7">0.7</option></select></label>
+      </div>
+      <ol id="contacts"></ol>
+      <div id="contacts-empty" class="empty" hidden>Nothing matches.</div>
+    </section>
+  </div>
+</div>
+
+<script src="/assets/keywords.js"></script>
+<script>
+  const id = location.pathname.split("/").filter(Boolean).pop();
+  const $ = (s) => document.getElementById(s);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const shortUrl = (u) => { try { const x = new URL(u); return x.host + x.pathname + x.search; } catch { return u; } };
+  const debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+  let crawl = null, editor = null, docsCursor = null;
+
+  function fillKeywordSelects(keywords) {
+    const groups = Object.entries(keywords || {});
+    const opts = (kind) => `<option value="">All</option>` + groups.filter(([, g]) => (g.kind || "document") === kind).map(([k]) => `<option>${esc(k)}</option>`).join("");
+    const keep = (sel, html) => { const v = sel.value; sel.innerHTML = html; if ([...sel.options].some((o) => o.value === v)) sel.value = v; };
+    keep($("d-kw"), opts("document"));
+    keep($("c-kw"), opts("contact"));
+  }
+
+  function docItem(d) {
+    const src = d.sources && d.sources[0];
+    return `<li class="item">
+      <div class="meta"><span class="score">${d.target_score.toFixed(2)}</span>
+        ${d.doc_type ? `<span class="chip">${esc(d.doc_type)}</span>` : ""}
+        ${d.fiscal_year ? `<span>FY${d.fiscal_year}</span>` : ""}
+        <span>${esc(d.file_type ? d.file_type.toUpperCase() : d.type)}</span>
+        ${d.is_draft ? `<span class="chip">draft</span>` : ""}
+        ${d.needs_browser ? `<span class="chip">needs browser</span>` : ""}
+        <span>decided by ${esc(d.decided_by)}</span></div>
+      <a class="title" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.label || shortUrl(d.url))}</a>
+      ${src ? `<div class="src">found on <a href="${esc(src.page)}" target="_blank" rel="noopener">${esc(shortUrl(src.page))}</a>${src.section_heading ? ` · under “${esc(src.section_heading)}”` : ""}</div>` : ""}
+      ${d.reason ? `<div class="why" title="${esc(d.reason)}">${esc(d.reason)}</div>` : ""}
+    </li>`;
+  }
+
+  async function loadDocs(more = false) {
+    const p = new URLSearchParams({ crawl_id: id, limit: "25", min_score: $("d-min").value });
+    if ($("d-type").value) p.set("type", $("d-type").value);
+    if ($("d-kw").value) p.set("keyword", $("d-kw").value);
+    if ($("d-fy").value) p.set("fiscal_year", $("d-fy").value);
+    if ($("d-q").value.trim().length >= 2) p.set("q", $("d-q").value.trim());
+    if (more && docsCursor) p.set("cursor", docsCursor);
+    const j = await fetch(`/v1/links?${p}`).then((r) => r.json());
+    if (j.error) { $("docs").innerHTML = `<li class="item err">${esc(j.error.message)}</li>`; return; }
+    const html = (j.data || []).map(docItem).join("");
+    $("docs").innerHTML = more ? $("docs").innerHTML + html : html;
+    docsCursor = j.next_cursor;
+    $("docs-more").hidden = !docsCursor;
+    $("docs-empty").hidden = $("docs").children.length > 0;
+  }
+
+  function contactItem(c) {
+    return `<li class="item">
+      <div class="meta"><span class="score">${c.score.toFixed(2)}</span>
+        ${(c.matched_keywords || []).map((k) => `<span class="chip">${esc(k)}</span>`).join("")}
+        <span>decided by ${esc(c.decided_by)}</span></div>
+      <div class="title">${esc(c.name)}</div>
+      ${c.title ? `<div>${esc(c.title)}</div>` : ""}
+      ${c.email ? `<div><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ""}
+      ${c.phone ? `<div>${esc(c.phone)}</div>` : ""}
+      ${c.source_url ? `<div class="src">found on <a href="${esc(c.source_url)}" target="_blank" rel="noopener">${esc(shortUrl(c.source_url))}</a></div>` : ""}
+    </li>`;
+  }
+
+  async function loadContacts() {
+    const p = new URLSearchParams({ crawl_id: id, limit: "100", min_score: $("c-min").value });
+    if ($("c-kw").value) p.set("keyword", $("c-kw").value);
+    if ($("c-q").value.trim().length >= 2) p.set("q", $("c-q").value.trim());
+    const j = await fetch(`/v1/contacts?${p}`).then((r) => r.json());
+    if (j.error) { $("contacts").innerHTML = `<li class="item err">${esc(j.error.message)}</li>`; return; }
+    $("contacts").innerHTML = (j.data || []).map(contactItem).join("");
+    $("contacts-empty").hidden = (j.data || []).length > 0;
+  }
+
+  const reloadDocs = debounce(() => loadDocs(false));
+  const reloadContacts = debounce(loadContacts);
+  ["d-q", "d-fy"].forEach((k) => $(k).addEventListener("input", reloadDocs));
+  ["d-kw", "d-type", "d-min"].forEach((k) => $(k).addEventListener("change", () => loadDocs(false)));
+  $("c-q").addEventListener("input", reloadContacts);
+  ["c-kw", "c-min"].forEach((k) => $(k).addEventListener("change", loadContacts));
+  $("docs-more").onclick = () => loadDocs(true);
+
+  $("rerank").onclick = async () => {
+    const status = $("rerank-status");
+    let keywords;
+    try { keywords = editor.value(); } catch (x) { status.className = "err"; status.textContent = x.message; return; }
+    $("rerank").disabled = true;
+    status.className = "muted";
+    status.textContent = "Re-ranking every saved page… (up to half a minute)";
+    const r = await fetch(`/v1/crawls/${id}/rescore`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ keywords, llm: $("use-llm").checked }),
+    });
+    const j = await r.json();
+    $("rerank").disabled = false;
+    if (!r.ok) { status.className = "err"; status.textContent = j.error ? j.error.message : "re-rank failed"; return; }
+    crawl = j.crawl;
+    status.className = "muted";
+    status.textContent = `Re-ranked ${j.rescored.pages} pages in ${(j.rescored.ms / 1000).toFixed(1)} s: ${crawl.counters.results} results, ${crawl.counters.contacts} contacts.`;
+    fillKeywordSelects(crawl.keywords);
+    await Promise.all([loadDocs(false), loadContacts()]);
+  };
+
+  async function init() {
+    const [c, kw, health] = await Promise.all([
+      fetch(`/v1/crawls/${id}`).then((r) => r.json()),
+      fetch("/v1/keywords").then((r) => r.json()),
+      fetch("/health").then((r) => r.json()).catch(() => ({})),
+    ]);
+    if (c.error) { $("seed").textContent = c.error.message; return; }
+    crawl = c;
+    document.title = "Results: " + shortUrl(c.seed_url);
+    $("seed").textContent = shortUrl(c.seed_url);
+    $("status").textContent = c.status;
+    $("status").className = "pill " + c.status;
+    $("live").href = `/live/${id}`;
+    editor = KeywordEditor($("kw"), c.keywords, kw.default);
+    if (!health.llm) { $("use-llm").disabled = true; $("use-llm").parentElement.title = "No OPENAI_API_KEY on this server"; }
+    const running = ["queued", "running"].includes(c.status);
+    if (running) {
+      $("rerank").disabled = true;
+      $("rerank-status").textContent = "The crawl is still running: re-rank once it is done. Results below refresh as it goes.";
+      const t = setInterval(async () => {
+        const now = await fetch(`/v1/crawls/${id}`).then((r) => r.json());
+        $("status").textContent = now.status;
+        $("status").className = "pill " + now.status;
+        await Promise.all([loadDocs(false), loadContacts()]);
+        if (!["queued", "running"].includes(now.status)) { clearInterval(t); $("rerank").disabled = false; $("rerank-status").textContent = ""; }
+      }, 5000);
+    }
+    fillKeywordSelects(c.keywords);
+    await Promise.all([loadDocs(false), loadContacts()]);
+  }
+  init();
+</script>
+</body>
+</html>

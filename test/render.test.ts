@@ -56,7 +56,9 @@ function startScriptSite() {
               <a href="/finance">Business &amp; Financial Services</a>
               <a href="/check">Board documents</a>
               <a href="/monitored">Financial reports</a>
-              <a href="/refused">Transparency</a>`,
+              <a href="/refused">Transparency</a>
+              <a href="/old-finance">Finance (old address)</a>
+              <a href="/staff-portal">Staff portal</a>`,
           }),
         ),
       "/private/data": () => send("text/plain", "Secret budget"),
@@ -90,10 +92,22 @@ function startScriptSite() {
           `document.getElementById('app').innerHTML = '<h1>Financial reports</h1><p>${"The district publishes its audited annual financial report every year after the audit is complete. ".repeat(14)}</p><a href="/docs/2025-annual-financial-report.pdf">Annual Financial Report FY2025</a>';`,
         ),
       "/_Incapsula_Resource": () => send("text/javascript", "/* monitoring */"),
+      // An old address of the finance page, and a sign-in page that is an empty shell too.
+      "/old-finance": () => {
+        res.writeHead(302, { location: "/finance" });
+        res.end();
+      },
+      // An ordinary link that redirects to single sign-on, as ASU's do.
+      "/staff-portal": () => {
+        res.writeHead(302, { location: "/account/login?next=/finance" });
+        res.end();
+      },
+      "/account/login": () => send("text/html", shell("/login.js", "Sign in")),
+      "/login.js": () => send("text/javascript", `document.getElementById('app').innerHTML = '<form><input name=user><input name=pass type=password></form>';`),
       // A page that refuses automated requests outright.
       "/refused": () => send("text/html", "<html><body>Forbidden</body></html>", 403),
     };
-    const route = routes[path];
+    const route = routes[path] ?? routes[path.split("?")[0]!];
     if (route) route();
     else send("text/html", "<html><body>not found</body></html>", 404);
   });
@@ -146,7 +160,8 @@ describe.skipIf(!browserAvailable)("render tier: pages drawn by scripts", () => 
     });
 
     it("opens the empty shells in the browser and finds the links, the budget and the contact the scripts draw", async () => {
-      const rendered = await db.query("select url from pages where rendered order by url");
+      // By where the page ended up: /finance may be first reached through its old address.
+      const rendered = await db.query("select coalesce(final_url, url) as url from pages where rendered order by 1");
       expect(rendered.rows.map((r) => r.url.replace(site.url, ""))).toEqual(expect.arrayContaining(["/", "/finance"]));
       const budget = await db.query(
         `select s.target_score, s.doc_type from link_scores s join links l on l.id = s.link_id where s.crawl_id = $1 and l.url like '%fy2027-adopted-budget.pdf'`,
@@ -171,6 +186,15 @@ describe.skipIf(!browserAvailable)("render tier: pages drawn by scripts", () => 
       const refusedInBrowser = run.events.some((e) => e.type.startsWith("page.render") && String(e.data.url).endsWith("/refused"));
       expect(refusedInBrowser).toBe(false);
       expect(run.hits.filter((h) => h === "/refused")).toHaveLength(1); // the one plain fetch, never retried
+    });
+
+    it("opens each page in the browser once, however many links lead to it, and never a sign-in page", () => {
+      const opened = run.events.filter((e) => e.type.startsWith("page.render")).map((e) => String(e.data.url).replace(site.url, ""));
+      expect(opened.length).toBe(new Set(opened).size);
+      expect(opened.filter((u) => u === "/finance")).toHaveLength(1);
+      expect(run.hits).toContain("/account/login?next=/finance"); // reached by the plain fetch
+      expect(opened.some((u) => u.includes("login"))).toBe(false); // but not opened in the browser
+      expect(run.hits.some((h) => h.startsWith("/login.js"))).toBe(false); // so its script never ran
     });
 
     it("does not mistake a bot-protection script on a full page for a bot check", async () => {

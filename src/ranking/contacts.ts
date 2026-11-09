@@ -314,7 +314,8 @@ export async function findContacts($: CheerioAPI, dataBlocks: string[], ctx: Con
         email: p.email,
         phone: p.phone,
         score: scoreContact(p, m, ctx),
-        matchedKeywords: [m.term],
+        // The group's name first, so contacts can be filtered by group ("finance director").
+        matchedKeywords: [...new Set([m.group.key, m.term])],
         snippet: block.slice(0, 600),
         decidedBy: p.by,
       };

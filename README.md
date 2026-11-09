@@ -68,8 +68,11 @@ You need Docker. Node 20.12 or newer (22 recommended) is only needed to run outs
 docker compose up --build
 ```
 
-Open http://localhost:3000, pick a test site, press **Crawl**, and watch it live. The API docs
-are at http://localhost:3000/docs.
+Open http://localhost:3000, pick a test site, adjust the keywords and weights if you like, press
+**Crawl**, and watch it live. Each crawl has a **results page** (`/results/{id}`): search the
+documents and the contacts, filter by keyword, year and score, and change the keyword weights
+and re-rank the crawl from its saved pages without crawling again. The API docs are at
+http://localhost:3000/docs.
 
 An LLM key is optional. Without it, everything runs on rules alone:
 
@@ -181,6 +184,12 @@ rank below it (see Contacts).
 Scores are stored per crawl, so two crawls of the same site with different keywords never
 overwrite each other.
 
+**Change them after the crawl.** `POST /v1/crawls/{id}/rescore` with new keywords ranks every
+page the crawl saved again, from disk, and keeps the new keywords on the crawl. Nothing is
+fetched; without the LLM it costs nothing, and 300 pages take 10 to 40 seconds. Setting the
+budget weight to 0, for example, drops the budgets out of the results and leaves the ACFRs. The
+results page does the same with sliders.
+
 ### The LLM tier
 
 Links that the rules score between 0.2 and 0.7 go to the LLM, 50 at a time, as short records:
@@ -256,8 +265,10 @@ that JSON too, which is how ASU's CFO is found without a browser.
   images, fonts or styles, caps a page at 60 requests, and the browser may load a page or data
   URL only where robots.txt allows this bot. A page that refused us (401, 403, 429) is never
   opened in the browser, and a page that shows a bot check is reported and left alone; a
-  bot-protection script on a page that loaded fully is not a check. Each page gets a fresh browser
-  context, so no cookies carry over. Example: Boerne's jobs site on SchoolSpring is an empty
+  bot-protection script on a page that loaded fully is not a check; a 429 in the browser slows
+  the crawl down like a 429 to a fetch. Each page is rendered once, however many links lead to
+  it, and sign-in pages are never rendered. Each page gets a fresh browser context, so no cookies
+  carry over. Example: Boerne's jobs site on SchoolSpring is an empty
   shell to a plain fetch; rendered in 2.4 seconds, it lists the district's HR contacts.
 - **Honest identity:** `User-Agent: HighValueLinkScraper/0.1 (+https://github.com/igalk1515/high-value-link-scraper)`.
 
@@ -276,7 +287,10 @@ Interactive docs: http://localhost:3000/docs (OpenAPI JSON at `/docs/json`).
 | `GET` | `/v1/crawls/{id}/events` | Live Server-Sent Events stream; resumes from `Last-Event-ID` |
 | `GET` | `/v1/links` | Ranked links. `crawl_id`, or `host` for that site's latest crawl. Filters: `type`, `doc_type`, `fiscal_year`, `min_score`, `keyword`, `q` (full-text). Keyset pagination with `cursor`. |
 | `GET` | `/v1/links/{id}` | One link with every place it was found |
-| `GET` | `/v1/contacts` | Contacts, with the page and the text each was checked against |
+| `GET` | `/v1/contacts` | Contacts, with the page and the text each was checked against. Filters: `q` (words in the name, title or email), `keyword` (a keyword group such as `finance director`, or a term such as `purchasing`), `title`, `min_score` |
+| `GET` | `/v1/keywords` | The default keyword groups, to start from |
+| `POST` | `/v1/crawls/{id}/rescore` | Re-rank a finished crawl with new `keywords` from its saved pages; `llm: true` runs the LLM tier too. 409 while the crawl is running |
+| `GET` | `/results/{id}` | Results page: search, filters, keyword editor, re-rank |
 | `GET` | `/live/{id}` | Watch page for a crawl |
 | `GET` | `/health` | Database check, and whether the LLM tier is on |
 
@@ -362,6 +376,10 @@ curl 'http://localhost:3000/v1/links?host=boerneisd.net&fiscal_year=2027'       
 curl 'http://localhost:3000/v1/links?host=a2gov.org&q=single+audit'             # full-text search
 curl 'http://localhost:3000/v1/crawls/<id>/pages?status=skipped'                # what was skipped, and why
 curl 'http://localhost:3000/v1/crawls/<id>/pages?status=broken'                 # broken links, with the page each was on
+curl 'http://localhost:3000/v1/contacts?host=boerneisd.net&q=payroll'           # people whose name, title or email says payroll
+curl 'http://localhost:3000/v1/contacts?host=boerneisd.net&keyword=purchasing'  # contacts matched through "purchasing"
+curl -X POST http://localhost:3000/v1/crawls/<id>/rescore -H 'content-type: application/json' \
+  -d '{"keywords": {"acfr": {"weight": 1, "kind": "document", "synonyms": ["annual financial report"]}}}'  # rank for the ACFR alone
 ```
 
 Errors always look like this:

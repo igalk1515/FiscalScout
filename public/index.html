@@ -29,6 +29,9 @@
   .done { color: var(--ok); } .blocked, .failed { color: var(--bad); }
   a { color: var(--accent); }
   #err { color: var(--bad); margin-top: 8px; }
+  details.kw { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  details.kw summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  details.kw .hint { font-size: 13px; color: var(--muted); margin: 6px 0 10px; }
 </style>
 </head>
 <body>
@@ -41,6 +44,11 @@
     <label>Page budget<input id="budget" type="number" min="1" max="5000" value="300"></label>
     <button>Crawl</button>
   </form>
+  <details class="kw">
+    <summary>Keywords and weights</summary>
+    <div class="hint">What the crawl looks for. A document keyword ranks files (ACFR, budget); a contact keyword ranks people by title. Weight sets how much each one counts. Change them after a crawl too, on its results page, without crawling again.</div>
+    <div id="kw"></div>
+  </details>
   <div id="err"></div>
   <div class="sites">Test sites:
     <a data-u="https://www.a2gov.org/">a2gov.org</a>
@@ -53,12 +61,18 @@
     <tbody id="rows"><tr><td colspan="4">Loading…</td></tr></tbody>
   </table>
 </div>
+<script src="/assets/keywords.js"></script>
 <script>
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let editor = null;
+  fetch("/v1/keywords").then((r) => r.json()).then((j) => { editor = KeywordEditor(document.getElementById("kw"), j.default, j.default); });
   document.querySelectorAll("[data-u]").forEach((a) => a.onclick = () => { document.getElementById("url").value = a.dataset.u; });
   document.getElementById("f").onsubmit = async (e) => {
     e.preventDefault();
+    const err = document.getElementById("err");
+    err.textContent = "";
     const body = { url: url.value, max_depth: Number(depth.value), page_budget: Number(budget.value) };
+    try { if (editor) body.keywords = editor.value(); } catch (x) { err.textContent = x.message; return; }
     const r = await fetch("/v1/crawls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json();
     if (!r.ok) { document.getElementById("err").textContent = j.error ? j.error.message : "error"; return; }
@@ -70,7 +84,7 @@
       <td class="u">${esc(c.seed_url)}<br><span style="color:var(--muted);font-size:12px">${new Date(c.created_at).toLocaleString()}</span></td>
       <td class="${c.status}">${c.status}${c.status_detail ? `<br><span style="font-size:12px">${esc(c.status_detail)}</span>` : ""}</td>
       <td>${c.pages_fetched}</td>
-      <td><a href="/live/${c.id}">live</a> · <a href="/v1/links?crawl_id=${c.id}&min_score=0.5">links</a> · <a href="/v1/contacts?crawl_id=${c.id}">contacts</a></td>
+      <td><a href="/results/${c.id}">results</a> · <a href="/live/${c.id}">live</a></td>
     </tr>`).join("") : `<tr><td colspan="4">No crawls yet.</td></tr>`;
   }
   load();

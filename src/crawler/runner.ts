@@ -65,8 +65,9 @@ interface CrawlState {
    * seed points to. These are not held to the per-host share of the budget.
    */
   mainHosts: Set<string>;
-  /** Pages opened in the browser so far. */
+  /** Pages opened in the browser so far, and their URLs: many links can lead to the same page. */
   renders: number;
+  renderedUrls: Set<string>;
   seedOutcome: { status: number; reason: string } | null;
   llmCalls: number;
   llmCost: number;
@@ -78,6 +79,8 @@ interface CrawlState {
 const ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const BLOCKING_STATUSES = new Set([401, 403, 429, 451, 503]);
+/** Sign-in and single-sign-on pages: never worth opening in the browser. */
+const SIGN_IN_URL = /[/.?&=_-](log-?in|log-?on|sign-?in|sign-?on|sso|adfs|oauth2?|saml2?|cas\/login|auth(enticate|orize)?|idp)([/.?&=_-]|$)/i;
 
 /**
  * Runs crawls. Each crawl is a set of async workers that claim URLs from the frontier table,
@@ -142,6 +145,7 @@ export class CrawlRunner {
       mirrors: new Map(),
       mainHosts: new Set([hostOf(crawl.seed_url)]),
       renders: 0,
+      renderedUrls: new Set(),
       seedOutcome: null,
       llmCalls: 0,
       llmCost: 0,
@@ -366,10 +370,22 @@ export class CrawlRunner {
 
     // Render tier: an empty shell on the entity's own site that answered 200 is opened in the
     // browser, within the crawl's render budget. Anything that refused us never gets here.
+    // Not a copy of a page already read, not a page already rendered (several links can redirect
+    // to one page), and not a sign-in page, which holds nothing to find.
     let rendered = false;
     const { renderer } = this.o;
-    if (needsBrowser && renderer && r.status === 200 && inScope(finalUrl, scope) && state.renders < (this.o.renderMaxPerCrawl ?? 20)) {
+    if (
+      needsBrowser &&
+      renderer &&
+      r.status === 200 &&
+      !duplicate &&
+      !state.renderedUrls.has(finalUrl) &&
+      !SIGN_IN_URL.test(finalUrl) &&
+      inScope(finalUrl, scope) &&
+      state.renders < (this.o.renderMaxPerCrawl ?? 20)
+    ) {
       state.renders++;
+      state.renderedUrls.add(finalUrl);
       const rr = await this.renderPage(renderer, item, finalUrl);
       if (rr.ok && rr.html) {
         const $r = parseHtml(rr.html);
@@ -544,7 +560,9 @@ export class CrawlRunner {
       rr = await renderer.render(url, async (u) => isAllowed(await this.robotsFor(u), u, this.o.robotsToken));
       return rr;
     } finally {
-      await repo.releaseHost(db, item.host, Math.max(this.o.minDelayMs, Math.min(10_000, rr?.ms ?? 0)), "ok");
+      // A 429 or 503 in the browser means slow down, exactly as for a fetch.
+      const outcome: repo.FetchOutcome = rr?.status === 429 || rr?.status === 503 ? "slow_down" : "ok";
+      await repo.releaseHost(db, item.host, Math.max(this.o.minDelayMs, Math.min(10_000, rr?.ms ?? 0)), outcome);
     }
   }
 

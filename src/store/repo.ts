@@ -99,6 +99,11 @@ export async function latestCrawlForDomain(db: Db, domain: string): Promise<Craw
   return r.rows[0] ?? null;
 }
 
+/** After a re-rank with new keywords, the crawl's keywords are the ones its scores were made with. */
+export async function setCrawlKeywords(db: Db, id: string, keywords: KeywordConfig) {
+  await db.query("update crawls set keywords = $2 where id = $1", [id, JSON.stringify(keywords)]);
+}
+
 export async function setCrawlStatus(db: Db, id: string, status: CrawlStatus, detail: string | null = null) {
   await db.query(
     `update crawls set status = $2, status_detail = $3,

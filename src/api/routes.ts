@@ -5,8 +5,10 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { type AppContext, startCrawl } from "../app.js";
+import { rescoreCrawl } from "../crawler/rescore.js";
 import { registrableDomain } from "../crawler/url.js";
 import type { CrawlEvent } from "../events.js";
+import { DEFAULT_KEYWORDS, KeywordsSchema } from "../ranking/keywords.js";
 import * as repo from "../store/repo.js";
 import {
   ContactsOut,
@@ -25,12 +27,20 @@ import {
   LinksQuery,
   PagesOut,
   PagesQuery,
+  RescoreBody,
+  RescoreOut,
 } from "./schemas.js";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../public");
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
+/** Files the pages load from /assets. */
+const ASSETS: Record<string, string> = { "keywords.js": "text/javascript; charset=utf-8" };
 
 export class NotFound extends Error {}
+export class Conflict extends Error {}
+
+/** Crawls being re-ranked right now in this process: one re-rank per crawl at a time. */
+const rescoring = new Set<string>();
 
 async function crawlView(ctx: AppContext, c: repo.CrawlRow): Promise<z.infer<typeof CrawlOut>> {
   const k = await repo.crawlCounters(ctx.db, c.id);
@@ -205,7 +215,11 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
       if (q.type) add("l.type = ?", q.type);
       if (q.doc_type) add("s.doc_type = ?", q.doc_type);
       if (q.fiscal_year) add("l.fiscal_year = ?", q.fiscal_year);
-      if (q.keyword) add("? = any(s.matched_keywords)", q.keyword.toLowerCase());
+      if (q.keyword) {
+        // A keyword group's name ("acfr") or any term it matched ("annual financial report").
+        params.push(q.keyword.toLowerCase());
+        where.push(`($${params.length} = any(s.matched_keywords) or s.doc_type = $${params.length})`);
+      }
       if (q.q) add("l.search @@ websearch_to_tsquery('simple', ?)", q.q);
       if (cur) {
         params.push(cur.s, cur.f, cur.id);
@@ -275,15 +289,67 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
       },
     },
     async (req) => {
-      const crawl = await resolveCrawl(ctx, req.query);
+      const q = req.query;
+      const crawl = await resolveCrawl(ctx, q);
+      // q: every word must appear in the name, title or email.
+      const words = (q.q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
       const r = await ctx.db.query(
         `select id, name, title, email, phone, score, matched_keywords, source_url, source_snippet, decided_by
          from contacts
-         where crawl_id = $1 and score >= $2 and ($3::text is null or title ilike '%' || $3 || '%')
-         order by score desc, id asc limit $4`,
-        [crawl.id, req.query.min_score, req.query.title ?? null, req.query.limit],
+         where crawl_id = $1 and score >= $2
+           and ($3::text is null or title ilike '%' || $3 || '%')
+           and ($4::text is null or $4 = any(matched_keywords))
+           and (select bool_and(lower(name || ' ' || coalesce(title, '') || ' ' || coalesce(email, '')) like '%' || w || '%') from unnest($5::text[]) w) is not false
+         order by score desc, id asc limit $6`,
+        [crawl.id, q.min_score, q.title ?? null, q.keyword?.toLowerCase() ?? null, words, q.limit],
       );
       return { crawl: { id: crawl.id, seed_url: crawl.seed_url, status: crawl.status }, data: r.rows };
+    },
+  );
+
+  app.get(
+    "/v1/keywords",
+    {
+      schema: {
+        tags: ["results"],
+        summary: "The default keyword groups",
+        description: "Start from these and adjust weights, synonyms and related titles for a crawl or a re-rank.",
+        response: { 200: z.object({ default: KeywordsSchema }) },
+      },
+    },
+    async () => ({ default: DEFAULT_KEYWORDS }),
+  );
+
+  app.post(
+    "/v1/crawls/:id/rescore",
+    {
+      schema: {
+        tags: ["crawls"],
+        summary: "Re-rank a finished crawl with new keywords, without fetching anything",
+        description:
+          "Ranks every page the crawl saved again, from disk, with the given keyword groups and weights, and stores them as the crawl's keywords. Takes seconds to half a minute for 300 pages. 409 while the crawl is running or already being re-ranked.",
+        params: IdParams,
+        body: RescoreBody,
+        response: { 200: RescoreOut, ...errors, 409: ErrorOut },
+      },
+    },
+    async (req) => {
+      const crawl = await repo.getCrawl(ctx.db, req.params.id);
+      if (!crawl) throw new NotFound("crawl not found");
+      if (["queued", "running"].includes(crawl.status) || ctx.runner.isRunning(crawl.id)) throw new Conflict("the crawl is still running");
+      if (rescoring.has(crawl.id)) throw new Conflict("the crawl is already being re-ranked");
+      rescoring.add(crawl.id);
+      try {
+        const t0 = Date.now();
+        const keywords = req.body.keywords ?? crawl.keywords;
+        const r = await rescoreCrawl(ctx, crawl.id, { keywords, llm: req.body.llm && ctx.llm.enabled });
+        if (req.body.keywords) await repo.setCrawlKeywords(ctx.db, crawl.id, req.body.keywords);
+        await ctx.events.emit(crawl.id, "crawl.rescored", { keywords: Object.keys(keywords), links: r.links, contacts: r.contacts });
+        const fresh = (await repo.getCrawl(ctx.db, crawl.id))!;
+        return { crawl: await crawlView(ctx, fresh), rescored: { pages: r.pages, links: r.links, contacts: r.contacts, ms: Date.now() - t0 } };
+      } finally {
+        rescoring.delete(crawl.id);
+      }
     },
   );
 
@@ -355,6 +421,18 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
   root.get("/", { schema: { hide: true } }, async (_req, reply) => {
     reply.type("text/html; charset=utf-8");
     return readFile(resolve(PUBLIC_DIR, "index.html"), "utf8");
+  });
+
+  root.get("/results/:id", { schema: { hide: true } }, async (_req, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return readFile(resolve(PUBLIC_DIR, "results.html"), "utf8");
+  });
+
+  root.get<{ Params: { file: string } }>("/assets/:file", { schema: { hide: true } }, async (req, reply) => {
+    const type = ASSETS[req.params.file];
+    if (!type) throw new NotFound("no such asset");
+    reply.type(type);
+    return readFile(resolve(PUBLIC_DIR, req.params.file), "utf8");
   });
 
   root.get("/health", { schema: { tags: ["system"], summary: "Liveness and database check" } }, async () => {

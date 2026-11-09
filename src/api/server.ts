@@ -3,7 +3,7 @@ import swaggerUi from "@fastify/swagger-ui";
 import { fastify, type FastifyError } from "fastify";
 import { jsonSchemaTransform, serializerCompiler, validatorCompiler } from "fastify-type-provider-zod";
 import { type AppContext, BadRequest } from "../app.js";
-import { NotFound, registerRoutes } from "./routes.js";
+import { Conflict, NotFound, registerRoutes } from "./routes.js";
 
 interface ValidationIssue {
   instancePath?: string;
@@ -52,6 +52,7 @@ export async function buildServer(ctx: AppContext) {
       return reply.status(400).send({ error: { code: "invalid_parameter", message: e.message, ...(e.param ? { param: e.param } : {}) } });
     }
     if (e instanceof NotFound) return reply.status(404).send({ error: { code: "not_found", message: e.message } });
+    if (e instanceof Conflict) return reply.status(409).send({ error: { code: "conflict", message: e.message } });
     if (err.statusCode && err.statusCode < 500) {
       return reply.status(err.statusCode).send({ error: { code: err.code?.toLowerCase() ?? "bad_request", message: err.message } });
     }

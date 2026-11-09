@@ -29,6 +29,14 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
      order by f.depth, f.path_score desc`,
     [crawlId],
   );
+  // What the crawl learned by fetching: an opaque URL (".../DocumentCenter/View/77") that turned
+  // out to be a PDF is still a PDF when ranked again.
+  const learned = await ctx.db.query<{ url: string; file_type: string | null }>(
+    `select l.url, l.file_type from links l join link_scores s on s.link_id = l.id
+     where s.crawl_id = $1 and l.type = 'document' and l.file_type is not null`,
+    [crawlId],
+  );
+  const fileTypes = new Map(learned.rows.map((r) => [r.url, r.file_type!]));
   await ctx.db.query("delete from link_scores where crawl_id = $1", [crawlId]);
   await ctx.db.query("delete from sightings where crawl_id = $1", [crawlId]);
   await ctx.db.query("delete from contacts where crawl_id = $1", [crawlId]);
@@ -68,7 +76,10 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
       }
       page.links = [...byUrl.values()];
     }
-    const all = page.links.map((link) => ({ link, s: scoreLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope) }) }));
+    const all = page.links.map((link) => ({
+      link,
+      s: scoreLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope), contentTypeFileType: fileTypes.get(link.url) }),
+    }));
     if (llm) await applyLlmTier(llm, groups, all); // answers seen before come from the cache, free
     const scored = all.filter((x) => x.s.targetScore > 0);
     const saved = await repo.saveLinks(
