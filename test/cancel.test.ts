@@ -81,6 +81,8 @@ describe("POST /v1/crawls/:id/cancel", () => {
   it("stops a running crawl: nothing new is fetched, the queue is skipped, the end is announced once", async () => {
     const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}/`, max_depth: 5, page_budget: 300 } });
     const id = res.json().id;
+    const live: { type: string; data: Record<string, unknown> }[] = [];
+    const unsubscribe = ctx.events.subscribe(id, (e) => live.push({ type: e.type, data: e.data }));
     const running = ctx.runner.start(id); // the run the API started
     await waitFor(async () => (await frontier(id)).some((r) => r.status === "done" && r.n >= 3));
 
@@ -108,7 +110,12 @@ describe("POST /v1/crawls/:id/cancel", () => {
     expect(types.filter((t) => t === "crawl.cancelled")).toHaveLength(1);
     expect(types).not.toContain("crawl.done");
     expect(types.filter((t) => t.startsWith("crawl.")).pop()).toBe("crawl.cancelled");
-    expect(types.lastIndexOf("stats")).toBeLessThan(types.indexOf("crawl.cancelled")); // final counters come first
+    // The final counters go out before the end, with nothing left in the queue.
+    unsubscribe();
+    const end = live.findIndex((e) => e.type === "crawl.cancelled");
+    const lastStats = live.slice(0, end).filter((e) => e.type === "stats").pop();
+    expect(lastStats?.data).toMatchObject({ pages_queued: 0, pages_fetching: 0 });
+    expect(lastStats?.data.pages_skipped).toBeGreaterThan(0);
   });
 
   it("answers 409 once the crawl has ended and 404 for an unknown crawl; results stay readable", async () => {

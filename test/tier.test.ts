@@ -51,7 +51,7 @@ describe("LLM tier", () => {
   });
 
   it("keeps a paper about the budget below the budget, even when the LLM is sure", async () => {
-    const paper = link("https://cdn.gov/260501-fy27-budget-responses.pdf", "FY27 Budget Responses");
+    const paper = link("https://cdn.example/260501-fy27-budget-responses.pdf", "FY27 Budget Responses");
     const xs = [{ link: paper, s: scoreLink(paper, { groups, parentPathScore: 0.9, internal: false, now: NOW }) }];
     expect(xs[0]!.s.supportingPaper).toBe(true);
     const fake: LlmClient = {
@@ -62,10 +62,24 @@ describe("LLM tier", () => {
     expect(xs[0]!.s.targetScore).toBeCloseTo(0.54);
   });
 
+  it("keeps a document on another government's site below the entity's own, even when the LLM is sure", async () => {
+    const state = { ...link("https://ospb.az.gov/budget/FY2025-Executive-Budget-Summary.pdf", "FY 2025 Executive Budget Summary"), heading: "Governor's Executive Budget Recommendation" };
+    const own = { ...link("https://azregents.sharepoint.com/:b:/s/public/fy2025", "FY 2025"), heading: "Annual Operating Budget" };
+    const xs = [state, own].map((l) => ({ link: l, s: scoreLink(l, { groups, parentPathScore: 0.9, internal: false, now: NOW }) }));
+    for (const x of xs) x.s.targetScore = 0.5; // both in the unsure band
+    const fake: LlmClient = {
+      enabled: true, model: "fake", extractContacts: async () => [],
+      classifyLinks: async (items) => items.map((it) => ({ i: it.i, doc_type: "budget", target_score: 1, path_score: 0, reason: "a budget" })),
+    };
+    await applyLlmTier(fake, groups, xs, undefined, NOW);
+    expect(xs[0]!.s.targetScore).toBeCloseTo(xs[1]!.s.targetScore * 0.75);
+    expect(xs[0]!.s.reason).toMatch(/another government's site/);
+  });
+
   it("puts links the rules are sure about on the same scale, so a lifted older year stays below", async () => {
     const heading = "Annual Comprehensive Financial Report (ACFR)";
-    const fy25 = { ...link("https://cdn.gov/city-6-30-25-acfr-final.pdf", "Fiscal Year 2025"), heading };
-    const fy24 = { ...link("https://cdn.gov/city-6-30-24-acfr-final.pdf", "Fiscal Year 2024"), heading };
+    const fy25 = { ...link("https://cdn.example/city-6-30-25-acfr-final.pdf", "Fiscal Year 2025"), heading };
+    const fy24 = { ...link("https://cdn.example/city-6-30-24-acfr-final.pdf", "Fiscal Year 2024"), heading };
     const xs = [fy25, fy24].map((l) => ({ link: l, s: scoreLink(l, { groups, parentPathScore: 0.9, internal: false, now: NOW }) }));
     xs[1]!.s.targetScore = 0.65; // the older year fell into the unsure band
     const fake: LlmClient = {

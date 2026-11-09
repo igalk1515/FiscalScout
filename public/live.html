@@ -176,7 +176,14 @@
     on("stats", (d) => setCounters(d));
     for (const end of ["crawl.done", "crawl.blocked", "crawl.failed", "crawl.cancelled"]) {
       const cls = end === "crawl.done" ? "ok" : end === "crawl.cancelled" ? "warn" : "bad";
-      on(end, (d) => { setStatus(end.split(".")[1], d.detail); addRow("end", cls, "", crawl.seed_url, d.detail || end); refreshResults(); es.close(); });
+      on(end, (d) => {
+        setStatus(end.split(".")[1], d.detail);
+        addRow("end", cls, "", crawl.seed_url, d.detail || end);
+        refreshResults();
+        es.close();
+        // The final counters, as stored: nothing is left in the queue once a crawl ends.
+        fetch(`/v1/crawls/${id}`).then((r) => r.json()).then((c) => c.counters && setCounters(c.counters)).catch(() => {});
+      });
     }
     setInterval(() => { if (!finishedAt) refreshResults(); }, 5000);
   }

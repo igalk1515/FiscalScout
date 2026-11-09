@@ -28,6 +28,8 @@ export interface LinkScore {
   internal?: boolean;
   /** A paper about a document ("Budget Responses", "Hearing Notice"), not the document itself. */
   supportingPaper?: boolean;
+  /** A document on another government's site: likely that government's, not the entity's. */
+  otherGovernment?: boolean;
 }
 
 export interface ScoreContext {
@@ -40,6 +42,15 @@ export interface ScoreContext {
   contentTypeFileType?: string | null;
   now?: Date;
 }
+
+/** Government hosts: .gov, .mil, .gov.xx, and US state and local domains such as tx.us. */
+const GOVERNMENT_HOST = /\.(gov|mil)$|\.gov\.[a-z]{2}$|\.[a-z]{2}\.us$/i;
+/**
+ * A document on another government's site is most likely that government's own: a university
+ * links to the state's budget summary, a city to the county's. Ranked below the entity's own.
+ */
+export const OTHER_GOVERNMENT_FACTOR = 0.75;
+export const onOtherGovernmentSite = (url: string, internal: boolean) => !internal && GOVERNMENT_HOST.test(new URL(url).hostname);
 
 export const SOCIAL_HOSTS =
   /(^|\.)(facebook|twitter|x|instagram|youtube|youtu|linkedin|tiktok|nextdoor|flickr|pinterest|threads|vimeo|snapchat)\.(com|be|net)$/i;
@@ -160,6 +171,7 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
   // ---- target score
   let target = best.target;
   let supportingPaper = false;
+  let otherGovernment = false;
   const notes = [...best.notes];
   if (target > 0) {
     if (isDoc) {
@@ -198,6 +210,11 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
       if (mult < 1) {
         target *= mult;
         notes.push(`fiscal year ${year} (x${mult.toFixed(2)})`);
+      }
+      otherGovernment = onOtherGovernmentSite(link.url, ctx.internal);
+      if (otherGovernment) {
+        target *= OTHER_GOVERNMENT_FACTOR;
+        notes.push(`on another government's site (${u.hostname}), likely its document, not the entity's (x${OTHER_GOVERNMENT_FACTOR.toFixed(2)})`);
       }
     }
   }
@@ -247,5 +264,6 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
     noise,
     internal: ctx.internal,
     supportingPaper,
+    otherGovernment,
   };
 }

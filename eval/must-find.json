@@ -62,7 +62,9 @@
           "any_of": ["https://azregents.sharepoint.com/:b:/s/ABORPublic/Committee/Board/IQDqzHYxINVCRIodPTa5Q03nAY1bAil0wGE2sT3teJ6TJn0"]
         },
         { "kind": "contact", "what": "Executive Vice President, Treasurer and CFO", "name": "Morgan R. Olsen" }
-      ]
+      ],
+      "not_entity_hosts": ["ospb.az.gov"],
+      "not_entity_note": "ospb.az.gov is the Governor's budget office: its budget summaries are the State of Arizona's, not ASU's."
     },
     {
       "name": "Bozeman",
@@ -72,5 +74,6 @@
       "expect": []
     }
   ],
+  "relevant_note": "Precision@10: a top-10 document counts when this pattern matches its link text, URL or the heading it sits under, and it is not on one of the site's not_entity_hosts.",
   "relevant_pattern": "acfr|cafr|annual[- _]?(comprehensive[- _]?)?financial|comp-fin|budget|single[- _]?audit|saac|financial[- _]?(report|statement)|audit"
 }

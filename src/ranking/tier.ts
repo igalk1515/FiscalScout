@@ -2,7 +2,7 @@ import type { LinkCandidate } from "../crawler/extract.js";
 import { recencyMultiplier } from "./fileinfo.js";
 import type { CompiledGroup } from "./keywords.js";
 import type { CallInfo, LlmClient } from "./llm.js";
-import { type LinkScore, UNSURE_HIGH, UNSURE_LOW } from "./rules.js";
+import { type LinkScore, OTHER_GOVERNMENT_FACTOR, UNSURE_HIGH, UNSURE_LOW } from "./rules.js";
 
 type Scored = { link: LinkCandidate; s: LinkScore };
 
@@ -27,6 +27,10 @@ function confirmedScore(x: Scored, confidence: number, documentGroup: boolean, n
   if (x.s.supportingPaper) {
     score *= 0.6;
     notes.push("a paper about the document, not the document itself (x0.60)");
+  }
+  if (x.s.otherGovernment) {
+    score *= OTHER_GOVERNMENT_FACTOR;
+    notes.push(`on another government's site, likely its document, not the entity's (x${OTHER_GOVERNMENT_FACTOR.toFixed(2)})`);
   }
   if (x.s.type === "page" && x.s.internal) {
     // A page on the entity's own site about budgets is nearly always the list of budgets.

@@ -132,6 +132,27 @@ describe("rules scoring on the test sites", () => {
     expect(rfp.supportingPaper).toBe(true);
   });
 
+  it("a document on another government's site ranks below the entity's own", () => {
+    // From ASU: the state's budget summary is linked from cfo.asu.edu; ASU's own budget sits on
+    // the Board of Regents' SharePoint under the heading "Annual Operating Budget".
+    const base = { titleAttr: "", context: "", boilerplate: false, nofollow: false, source: "html" as const };
+    const ctx = { groups, parentPathScore: 0.9, internal: false, now: NOW };
+    const state = scoreLink(
+      { ...base, url: "https://ospb.az.gov/sites/default/files/2026-01/FY2027-Executive-Budget-Summary.pdf", anchor: "FY 2027 Executive Budget Summary", heading: "Governor's Executive Budget Recommendation" },
+      ctx,
+    );
+    const own = scoreLink({ ...base, url: "https://azregents.sharepoint.com/:b:/s/public/budget-fy2027", anchor: "FY 2027", heading: "Annual Operating Budget" }, ctx);
+    expect(state.otherGovernment).toBe(true);
+    expect(state.reason).toMatch(/another government's site \(ospb\.az\.gov\)/);
+    expect(state.targetScore).toBeLessThanOrEqual(0.75);
+    expect(own.otherGovernment).toBe(false);
+    // State and local US domains count too; the entity's own .gov site does not.
+    const county = scoreLink({ ...base, url: "https://www.co.washtenaw.mi.us/docs/budget-2026.pdf", anchor: "2026 Budget", heading: "Budget" }, ctx);
+    expect(county.otherGovernment).toBe(true);
+    const ownGov = scoreLink({ ...base, url: "https://www.bozeman.gov/docs/budget-2026.pdf", anchor: "2026 Budget", heading: "Budget" }, { ...ctx, internal: true });
+    expect(ownGov.otherGovernment).toBe(false);
+  });
+
   it("a link named for the office around a contact ('Purchasing') is worth visiting, an unrelated link is not", () => {
     const base = { titleAttr: "", heading: "", context: "", boilerplate: false, nofollow: false, source: "html" as const };
     const ctx = { groups, parentPathScore: 0, internal: true, now: NOW };

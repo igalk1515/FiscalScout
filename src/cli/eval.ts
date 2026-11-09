@@ -24,6 +24,8 @@ interface Site {
   domain: string;
   expect: Expect[];
   expect_blocked?: boolean;
+  /** Hosts whose documents belong to someone else (another government): never a hit. */
+  not_entity_hosts?: string[];
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -75,8 +77,9 @@ for (const site of spec.sites) {
     continue;
   }
 
-  const docs = await ctx.db.query<{ url: string; label: string | null; doc_type: string | null; target_score: number; fiscal_year: number | null }>(
-    `select l.url, l.label, s.doc_type, s.target_score, l.fiscal_year
+  const docs = await ctx.db.query<{ url: string; host: string; label: string | null; headings: string | null; doc_type: string | null; target_score: number; fiscal_year: number | null }>(
+    `select l.url, l.host, l.label, s.doc_type, s.target_score, l.fiscal_year,
+       (select string_agg(distinct g.section_heading, ' | ') from sightings g where g.link_id = l.id and g.crawl_id = s.crawl_id) as headings
      from link_scores s join links l on l.id = s.link_id
      where s.crawl_id = $1 and l.type = 'document'
      order by s.target_score desc, coalesce(l.fiscal_year, 0) desc, l.id`,
@@ -108,7 +111,10 @@ for (const site of spec.sites) {
   }
   found += siteFound;
   const top10 = docs.rows.slice(0, 10);
-  const precise = top10.filter((d) => relevant.test(`${d.url} ${d.label ?? ""}`)).length;
+  // A hit names a finance document in its text, URL or heading, and is the entity's own.
+  const notEntity = new Set(site.not_entity_hosts ?? []);
+  const isHit = (d: (typeof top10)[number]) => relevant.test(`${d.url} ${d.label ?? ""} ${d.headings ?? ""}`) && !notEntity.has(d.host);
+  const precise = top10.filter(isHit).length;
   const by = await ctx.db.query<{ llm: number; total: number }>(
     "select count(*) filter (where decided_by = 'llm')::int as llm, count(*)::int as total from link_scores where crawl_id = $1",
     [crawl.id],
@@ -117,7 +123,7 @@ for (const site of spec.sites) {
   out(`| ${site.name} | ${crawlText} | ${siteFound}/${site.expect.length} | ${top10.length ? `${precise}/${top10.length}` : "-"} | ${decided} |`);
   siteDetails.push("", "Top 5 documents:");
   for (const d of docs.rows.slice(0, 5)) {
-    siteDetails.push(`- ${d.target_score.toFixed(2)} ${d.doc_type ?? "-"} ${d.fiscal_year ?? ""} ${d.label ?? ""} <${d.url}>`);
+    siteDetails.push(`- ${d.target_score.toFixed(2)} ${d.doc_type ?? "-"} ${d.fiscal_year ?? ""} ${d.label ?? ""} <${d.url}>${notEntity.has(d.host) ? " (not the entity's)" : ""}`);
   }
   details.push(siteDetails.join("\n"));
 }
@@ -125,7 +131,7 @@ out("");
 out(`**Must-find recall: ${found}/${total}**`);
 out("");
 out(
-  "Precision@10 counts how many of the ten best-scored documents match a hand-written pattern for finance documents (ACFR, budget, audit, financial report). It is a quick check, not a full labeled set.",
+  "Precision@10 counts how many of the ten best-scored documents name a finance document (ACFR, budget, audit, financial report) in their link text, URL or the heading they sit under, and belong to the entity: documents on hosts listed as someone else's (the State of Arizona's budget office for ASU) never count. It is a quick check, not a full labeled set.",
 );
 for (const d of details) out(d);
 

@@ -200,10 +200,7 @@ export class CrawlRunner {
       clearInterval(ticker);
       this.states.delete(crawlId);
     }
-    if (state.cancelled) {
-      await this.emitStats(state);
-      return this.settleCancelled(crawlId, state.claimed);
-    }
+    if (state.cancelled) return this.closeCancelled(state);
 
     const budgetHit = state.claimed >= crawl.page_budget;
     if (budgetHit) await repo.skipQueued(db, crawlId, "page budget reached");
@@ -228,7 +225,7 @@ export class CrawlRunner {
     if (this.stopping) return; // stopped mid-crawl: leave it running so a restart resumes it
     await this.emitStats(state);
     // Cancelled just as it finished: the cancel stands.
-    if (!(await repo.setCrawlStatus(db, crawlId, status, detail))) return this.settleCancelled(crawlId, state.claimed);
+    if (!(await repo.setCrawlStatus(db, crawlId, status, detail))) return this.closeCancelled(state);
     await events.emit(crawlId, `crawl.${status}`, { detail, pages: state.claimed });
   }
 
@@ -645,6 +642,13 @@ export class CrawlRunner {
       if (f.reason === "out of scope" && row.pathScore < 0.3) continue;
       await events.emit(id, "page.skipped", { url: f.url, reason: f.reason, path_score: row.pathScore });
     }
+  }
+
+  /** After the workers of a cancelled crawl stop: skip the queue, send the final counters, announce. */
+  private async closeCancelled(state: CrawlState) {
+    await repo.skipQueued(this.o.db, state.crawl.id, "crawl cancelled");
+    await this.emitStats(state);
+    await this.settleCancelled(state.crawl.id, state.claimed);
   }
 
   private async emitStats(state: CrawlState) {
