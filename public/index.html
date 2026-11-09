@@ -20,6 +20,16 @@
   label { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
   input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
   button { font: 600 14px system-ui; padding: 9px 16px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  .options { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .toggle input { appearance: none; flex: 0 0 42px; width: 42px; height: 24px; margin: 0; padding: 2px; border-radius: 999px; background: var(--muted); cursor: pointer; }
+  .toggle input::before { content: ""; display: block; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+  .toggle input:checked { background: var(--accent); }
+  .toggle input:checked::before { transform: translateX(18px); }
+  .toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .toggle input:disabled { opacity: .45; cursor: not-allowed; }
+  .toggle strong { display: block; color: var(--fg); font-size: 14px; }
+  .toggle small { display: block; font-size: 12px; }
   .sites { margin: 10px 0 26px; font-size: 13px; color: var(--muted); }
   .sites a { margin-right: 10px; cursor: pointer; }
   table { width: 100%; border-collapse: collapse; overflow: hidden; }
@@ -42,7 +52,17 @@
     <label class="url">Start page<input id="url" type="url" required placeholder="https://www.a2gov.org/"></label>
     <label>Depth<input id="depth" type="number" min="0" max="5" value="3"></label>
     <label>Page budget<input id="budget" type="number" min="1" max="5000" value="300"></label>
-    <button>Crawl</button>
+    <button type="submit">Crawl</button>
+    <div class="options">
+      <label class="toggle">
+        <input id="respect-robots" type="checkbox" role="switch" checked aria-labelledby="robots-label" aria-describedby="robots-hint">
+        <span><strong id="robots-label">Respect robots.txt</strong><small id="robots-hint">Follow site crawling rules and nofollow directives.</small></span>
+      </label>
+      <label class="toggle">
+        <input id="use-llm" type="checkbox" role="switch" disabled aria-labelledby="llm-label" aria-describedby="llm-hint">
+        <span><strong id="llm-label">Use LLM</strong><small id="llm-hint" aria-live="polite">Checking availability…</small></span>
+      </label>
+    </div>
   </form>
   <details class="kw">
     <summary>Keywords and weights</summary>
@@ -65,13 +85,29 @@
 <script>
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   let editor = null;
+  const llmToggle = document.getElementById("use-llm");
+  const llmHint = document.getElementById("llm-hint");
+  fetch("/health").then((r) => {
+    if (!r.ok) throw new Error("Health check failed");
+    return r.json();
+  }).then((health) => {
+    llmToggle.disabled = !health.llm;
+    llmToggle.checked = !!health.llm;
+    llmHint.textContent = health.llm ? "Help rank links and extract contacts. Uses API credits." : "Unavailable: no LLM API key is configured.";
+  }).catch(() => { llmHint.textContent = "Could not check LLM availability. Using rules only."; });
   fetch("/v1/keywords").then((r) => r.json()).then((j) => { editor = KeywordEditor(document.getElementById("kw"), j.default, j.default); });
   document.querySelectorAll("[data-u]").forEach((a) => a.onclick = () => { document.getElementById("url").value = a.dataset.u; });
   document.getElementById("f").onsubmit = async (e) => {
     e.preventDefault();
     const err = document.getElementById("err");
     err.textContent = "";
-    const body = { url: url.value, max_depth: Number(depth.value), page_budget: Number(budget.value) };
+    const body = {
+      url: document.getElementById("url").value,
+      max_depth: Number(document.getElementById("depth").value),
+      page_budget: Number(document.getElementById("budget").value),
+      respect_robots: document.getElementById("respect-robots").checked,
+      use_llm: llmToggle.checked,
+    };
     try { if (editor) body.keywords = editor.value(); } catch (x) { err.textContent = x.message; return; }
     const r = await fetch("/v1/crawls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json();

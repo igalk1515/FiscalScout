@@ -44,6 +44,10 @@ Run it yourself with `npm run eval -- --run`.
 | Arizona State University (asu.edu) | 292 pages | 3/3 | 3/3 | 7/10 | 10/10 |
 | Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - | - |
 
+These results predate the request identity changes described below. Bozeman rejected the old
+custom crawler User-Agent but accepted both the Chrome header now used by default and Node's
+standard HTTP client in direct page-fetch tests.
+
 **Why ASU is 7/10 with rules alone.** ASU's finance site also links the State of Arizona's
 budget summaries. A document on another government's site gets × 0.75, so with the LLM, ASU's
 own reports and budgets fill the top 10, and the state's summaries come 11th and 12th. With
@@ -59,7 +63,7 @@ What it found, first in each list:
 | Ann Arbor | FY2025 ACFR (govstack CDN) | FY2026 adopted budget book; FY2027 on ClearGov | Marti Praschan, Chief Financial Officer, mpraschan@a2gov.org |
 | Boerne ISD | FY2025 Annual Financial Report (file host) | 2026-27 adopted budget, PDF and Excel | Wesley Scott, Chief Financial Officer, wesley.scott@boerneisd.net |
 | ASU | 2026 annual comprehensive financial report | FY2027 operating budget (Board of Regents SharePoint) | Morgan R. Olsen, Executive Vice President, Treasurer and CFO |
-| Bozeman | the site answers 403 to every automated request, including robots.txt; reported, not bypassed | | |
+| Bozeman | the original run received 403 with the custom crawler User-Agent | | |
 
 Two details worth knowing: ASU's finance site is reached without a browser through a footer link
 called "Jobs" (the host name `cfo.asu.edu` carries the signal), and ASU's CFO is read from JSON
@@ -113,8 +117,9 @@ Each one is described in [docs/scaling.md](docs/scaling.md):
 - authentication, rate limits and network restrictions on the API. Run it on a trusted
   network.
 
-**Not done, by choice:** getting past bot protection. Bozeman blocks automated requests, so
-the crawl reports the block.
+**HTTP access:** a configured User-Agent rejection gets one retry with Node's standard HTTP client.
+A continued refusal is reported as blocked. Interactive challenges and sign-in pages are not
+handled by this fallback.
 
 ---
 
@@ -133,6 +138,17 @@ Open http://localhost:3000, pick a test site, adjust the keywords and weights if
 documents and the contacts, filter by keyword, year and score, and change the keyword weights
 and re-rank the crawl from its saved pages without crawling again. The API docs are at
 http://localhost:3000/docs.
+
+The crawl form has two switches, saved separately for each crawl:
+- **Respect robots.txt** starts on. It controls robots.txt rules and crawl delays, including
+  redirect targets and browser requests, plus page and link `nofollow` directives.
+- **Use LLM** starts on when the server has an LLM API key. Switch it off to rank links and
+  extract contacts with rules alone. Without a key, the switch is disabled.
+
+API clients can pass `respect_robots` and `use_llm` as booleans to `POST /v1/crawls`.
+Both default to `true`; without an API key, `use_llm` is saved as `false` for new crawls.
+The settings are returned with crawl details. Re-ranking on the results page has its own
+LLM choice. Normal request pacing, scope and page limits still apply to every crawl.
 
 An LLM key is optional. Without it, everything runs on rules alone:
 
@@ -320,15 +336,21 @@ that JSON too, which is how ASU's CFO is found without a browser.
   of the Boerne budget went to copies (201 fetches for 121 distinct pages).
 - **Traps:** far-future calendar dates, repeating path segments, too many parameters, very long
   URLs. Duplicate content is detected by hash. Depth and page budget cap every crawl.
-- **Failures:** 4xx is final. A 404 or 410 is reported as a broken link, with the page it was
+- **HTTP 403 fallback:** retry once with Node's standard User-Agent when the configured request
+  identity is refused. The retry waits at least one second (or the crawl's longer host delay),
+  stays within the request timeout, and is shown as `page.retrying` in the live feed. Successful
+  identities are remembered per origin for the runner's lifetime. The robots switch still
+  applies, including rules for both the configured identity and the standard client. This also
+  lets the crawler retrieve robots.txt when its configured identity is refused.
+- **Failures:** a continued 403 is final. A 404 or 410 is reported as a broken link, with the page it was
   found on (`/v1/crawls/{id}/pages?status=broken`, and a list in the live view). Timeouts, network errors, 5xx and 429 are retried up to three
   times with backoff, honoring `Retry-After`. Five errors in a row pause a host. A site that
-  refuses automated requests is reported as `blocked` and never bypassed.
+  continues to refuse requests is reported as `blocked`.
 - **Render tier (`RENDER_JS=true`, off by default):** some pages arrive as an empty shell that
   scripts fill in. The plain fetch flags them `needs_browser`; with the render tier on, such a
   page is opened in a headless browser and read again. Only pages on the entity's own site that
   answered 200 are rendered, at most `RENDER_MAX_PER_CRAWL` (20) per crawl. A render is one polite
-  visit: it holds the site's lease like a fetch, uses the same honest User-Agent, loads no
+  visit: it holds the site's lease like a fetch, uses the same configured User-Agent, loads no
   images, fonts or styles, caps a page at 60 requests, and the browser may load a page or data
   URL only where robots.txt allows this bot. A page that refused us (401, 403, 429) is never
   opened in the browser, and a page that shows a bot check is reported and left alone; a
@@ -337,7 +359,11 @@ that JSON too, which is how ASU's CFO is found without a browser.
   it, and sign-in pages are never rendered. Each page gets a fresh browser context, so no cookies
   carry over. Example: Boerne's jobs site on SchoolSpring is an empty
   shell to a plain fetch; rendered in 2.4 seconds, it lists the district's HR contacts.
-- **Honest identity:** `User-Agent: HighValueLinkScraper/0.1 (+https://github.com/igalk1515/high-value-link-scraper)`.
+- **Request identity:** defaults to `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36`.
+  Set `HTTP_USER_AGENT` to override the full header. HTTP fetches, robots.txt requests and browser
+  rendering use the same value; robots.txt matching uses its leading product token (`Mozilla`
+  by default). The 403 fallback still uses Node's built-in User-Agent. `HTTP_USER_AGENT` replaces
+  the former `BOT_NAME`/`BOT_URL` header settings.
 
 ---
 
@@ -459,7 +485,7 @@ Errors always look like this:
 ### Live view
 
 Every step of a crawl is an event:
-- pages: `page.fetching`, `page.fetched`, `page.failed`, `page.skipped` (with the reason),
+- pages: `page.fetching`, `page.retrying`, `page.fetched`, `page.failed`, `page.skipped` (with the reason),
   `page.rendered`, `page.render_failed`;
 - results: `link.found`, `contact.found`;
 - crawl decisions: `scope.added`, `scope.mirror`, `host.paused`, `llm.capped`, `stats`;
@@ -517,8 +543,8 @@ in [eval/must-find.json](eval/must-find.json) and writes [eval/results.md](eval/
 
 ## Known limits
 
-- **Bozeman** refuses every automated request (HTTP 403 from its bot protection, even for
-  robots.txt). The crawl is reported as blocked. It is not bypassed.
+- **Access restrictions:** the 403 fallback helps with rejected User-Agent headers. A server
+  that also refuses the standard HTTP client is still reported as blocked.
 - **Pages drawn entirely by scripts** are read only with the render tier on, and only on the
   entity's own site. The ClearGov budget viewer sits on ClearGov's host, so it stays a ranked
   link flagged `needs_browser`. Links that scripts open on click (no `href`) are not followed.

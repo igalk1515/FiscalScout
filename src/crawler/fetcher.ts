@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 export interface FetchOptions {
   userAgent: string;
   timeoutMs?: number;
@@ -12,6 +14,13 @@ export interface FetchOptions {
    */
   beforeRedirect?: (from: string, to: string) => Promise<string | null>;
   accept?: string;
+  /** Origins where the runtime's standard User-Agent has already succeeded after a 403. */
+  standardAgentOrigins?: Set<string>;
+  /** Wait before the single User-Agent fallback, while still holding the caller's host lease. */
+  fallbackDelayMs?: number;
+  /** Apply any additional policy before a request using the standard User-Agent. */
+  beforeStandardAgentRequest?: (url: string) => Promise<string | null>;
+  onUserAgentFallback?: (url: string) => Promise<void>;
 }
 
 export interface FetchResult {
@@ -30,9 +39,11 @@ export interface FetchResult {
   error?: string;
   retryAfterMs?: number;
   headers: Record<string, string>;
+  /** This request used Node's standard User-Agent after the site's custom-agent rejection. */
+  userAgentFallback: boolean;
 }
 
-/** Whether trying again later could give a different answer. 4xx never does. */
+/** Whether trying again later could help, after any request-header fallback has finished. */
 export function isRetryable(r: FetchResult): boolean {
   if (r.error && r.status === 0) return true; // network error or timeout
   return r.status === 429 || r.status >= 500;
@@ -47,9 +58,9 @@ function parseRetryAfter(value: string | null): number | undefined {
 }
 
 /**
- * Fetches one URL politely: an honest User-Agent, a timeout for the whole exchange, at most
- * `maxRedirects` redirects with a loop check, and a size cap. Non-HTML bodies are not
- * downloaded unless asked for.
+ * Fetches with the crawler's User-Agent first. A 403 gets one paced retry using Node's own
+ * standard User-Agent. The whole exchange shares a timeout, redirect limit and size cap.
+ * Non-HTML bodies are not downloaded unless asked for.
  */
 export async function fetchUrl(url: string, opts: FetchOptions): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? 20_000;
@@ -60,6 +71,9 @@ export async function fetchUrl(url: string, opts: FetchOptions): Promise<FetchRe
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const redirects: string[] = [];
   let current = url;
+  const standardAgentOrigins = opts.standardAgentOrigins ?? new Set<string>();
+  const triedStandardAgent = new Set<string>();
+  let userAgentFallback = false;
 
   const result = (partial: Partial<FetchResult>): FetchResult => ({
     url,
@@ -73,23 +87,40 @@ export async function fetchUrl(url: string, opts: FetchOptions): Promise<FetchRe
     ms: Date.now() - started,
     redirects,
     headers: {},
+    userAgentFallback,
     ...partial,
   });
 
   try {
-    for (let hop = 0; ; hop++) {
+    for (let hop = 0; ;) {
+      const origin = new URL(current).origin;
+      const standardAgent = standardAgentOrigins.has(origin) || triedStandardAgent.has(current);
+      if (standardAgent) {
+        const stop = await opts.beforeStandardAgentRequest?.(current);
+        if (stop) return result({ status: 403, error: stop });
+        userAgentFallback = true;
+      }
       const res = await fetch(current, {
         method: "GET",
         redirect: "manual",
         signal: controller.signal,
         headers: {
-          "user-agent": opts.userAgent,
+          ...(standardAgent ? {} : { "user-agent": opts.userAgent }),
           accept: opts.accept ?? "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
           "accept-language": "en-US,en;q=0.8",
         },
       });
       const headers: Record<string, string> = {};
       res.headers.forEach((v, k) => (headers[k] = v));
+
+      if (res.status === 403 && !standardAgent) {
+        await res.body?.cancel().catch(() => {});
+        triedStandardAgent.add(current);
+        await opts.onUserAgentFallback?.(current);
+        await delay(opts.fallbackDelayMs ?? 1000, undefined, { signal: controller.signal });
+        continue;
+      }
+      if (standardAgent && res.status >= 200 && res.status < 400) standardAgentOrigins.add(origin);
 
       if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
         await res.body?.cancel().catch(() => {});
@@ -104,6 +135,7 @@ export async function fetchUrl(url: string, opts: FetchOptions): Promise<FetchRe
         }
         redirects.push(next);
         current = next;
+        hop++;
         continue;
       }
 

@@ -18,6 +18,8 @@ export const CreateCrawlBody = z.object({
   ),
   max_depth: z.number().int().min(0).max(5).default(3).describe("0 analyzes only the start page"),
   page_budget: z.number().int().min(1).max(5000).default(300).describe("Most pages fetched in this crawl"),
+  respect_robots: z.boolean().default(true).describe("Respect robots.txt rules, crawl delays and nofollow directives"),
+  use_llm: z.boolean().default(true).describe("Use the LLM for ranking and contacts when a server API key is configured"),
 });
 
 const Counters = z.object({
@@ -44,6 +46,8 @@ export const CrawlOut = z.object({
   keywords: z.record(z.any()),
   max_depth: z.number(),
   page_budget: z.number(),
+  respect_robots: z.boolean(),
+  use_llm: z.boolean(),
   extra_hosts: z.array(z.string()),
   counters: Counters,
   now_fetching: z.array(z.string()),

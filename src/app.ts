@@ -1,5 +1,5 @@
 import { pino } from "pino";
-import { type Config, config as defaultConfig, robotsToken, userAgent } from "./config.js";
+import { type Config, config as defaultConfig, robotsTokenFor } from "./config.js";
 import { Renderer } from "./crawler/render.js";
 import { CrawlRunner, type Logger } from "./crawler/runner.js";
 import { hostOf, normalizeUrl, registrableDomain, urlHash } from "./crawler/url.js";
@@ -31,6 +31,8 @@ export interface ContextOverrides {
 /** Wires the database, event bus, LLM client and crawl runner together. */
 export async function createContext(overrides: ContextOverrides = {}): Promise<AppContext> {
   const config = { ...defaultConfig, ...overrides.config };
+  const userAgent = config.HTTP_USER_AGENT;
+  const robotsToken = robotsTokenFor(userAgent);
   const log: Logger = overrides.log ?? pino({ level: config.LOG_LEVEL });
   const db = overrides.db ?? createDb(config.DATABASE_URL);
   await migrate(db);
@@ -98,6 +100,8 @@ export interface CrawlInput {
   keywords?: KeywordConfig;
   maxDepth?: number;
   pageBudget?: number;
+  respectRobots?: boolean;
+  useLlm?: boolean;
   idempotencyKey?: string | null;
 }
 
@@ -113,6 +117,8 @@ export async function startCrawl(ctx: AppContext, input: CrawlInput) {
       keywords: input.keywords ?? DEFAULT_KEYWORDS,
       maxDepth: input.maxDepth ?? 3,
       pageBudget: input.pageBudget ?? 300,
+      respectRobots: input.respectRobots ?? true,
+      useLlm: (input.useLlm ?? true) && ctx.llm.enabled,
       scopeDomain: registrableDomain(host),
       rankerVersion: RANKER_VERSION,
       idempotencyKey: input.idempotencyKey ?? null,

@@ -94,6 +94,8 @@ export class CrawlRunner {
   private states = new Map<string, CrawlState>();
   private readonly runnerId = randomUUID();
   private robots = new Map<string, { policy: RobotsPolicy; at: number }>();
+  /** Reuse successful standard-agent requests instead of provoking another 403 on every page. */
+  private standardAgentOrigins = new Set<string>();
   private stopping = false;
 
   constructor(private o: RunnerOptions) {}
@@ -182,7 +184,8 @@ export class CrawlRunner {
       max_depth: crawl.max_depth,
       page_budget: crawl.page_budget,
       keywords: Object.keys(crawl.keywords),
-      llm: this.o.llm.enabled ? this.o.llm.model : null,
+      respect_robots: crawl.respect_robots,
+      llm: crawl.use_llm && this.o.llm.enabled ? this.o.llm.model : null,
     });
 
     const ticker = setInterval(() => {
@@ -272,12 +275,17 @@ export class CrawlRunner {
     const cached = this.robots.get(host);
     if (cached && Date.now() - cached.at < ROBOTS_TTL_MS) return cached.policy;
     const stored = await repo.getRobots(this.o.db, host);
-    if (stored && Date.now() - stored.fetchedAt.getTime() < ROBOTS_TTL_MS) {
+    // A stored 403 may predate the header fallback: refresh it once in this runner so that
+    // newly accessible rules are not mistaken for an unavailable robots.txt file.
+    if (stored && stored.status !== 403 && Date.now() - stored.fetchedAt.getTime() < ROBOTS_TTL_MS) {
       const policy = policyFromResponse(robotsUrlFor(url), stored.status, stored.text);
       this.robots.set(host, { policy, at: stored.fetchedAt.getTime() });
       return policy;
     }
-    const fetched = await fetchRobots(url, this.o.userAgent);
+    const fetched = await fetchRobots(url, this.o.userAgent, {
+      standardAgentOrigins: this.standardAgentOrigins,
+      fallbackDelayMs: Math.max(1000, this.o.minDelayMs),
+    });
     await repo.saveRobots(this.o.db, host, fetched.status, fetched.text, crawlDelayMs(fetched.policy, this.o.robotsToken));
     this.robots.set(host, { policy: fetched.policy, at: Date.now() });
     return fetched.policy;
@@ -289,8 +297,9 @@ export class CrawlRunner {
     state.llmSpent += c.costUsd;
   };
 
-  /** The LLM client while the crawl is under its spending cap; a disabled one after. */
+  /** A disabled client when this crawl opts out or reaches its spending cap. */
   private llmFor(state: CrawlState): LlmClient {
+    if (!state.crawl.use_llm) return { ...this.o.llm, enabled: false };
     const cap = this.o.llmMaxUsdPerCrawl ?? 0.5;
     if (!this.o.llm.enabled || state.llmSpent < cap) return this.o.llm;
     if (!state.llmCapped) {
@@ -318,20 +327,30 @@ export class CrawlRunner {
       return;
     }
 
-    // robots.txt first
-    const policy = await this.robotsFor(item.url);
-    if (!isAllowed(policy, item.url, this.o.robotsToken)) {
+    // Only consult robots.txt when this crawl opts in.
+    const policy = state.crawl.respect_robots ? await this.robotsFor(item.url) : null;
+    if (policy && !isAllowed(policy, item.url, this.o.robotsToken)) {
       await repo.finishItem(db, id, item.url_hash, "skipped", null, "robots.txt");
       await repo.releaseHost(db, item.host, this.o.minDelayMs, "ok");
       if (item.depth === 0) state.seedOutcome = { status: 0, reason: "robots.txt" };
       await events.emit(id, "page.skipped", { url: item.url, reason: "robots.txt" });
       return;
     }
-    const delay = Math.max(this.o.minDelayMs, crawlDelayMs(policy, this.o.robotsToken) ?? 0);
+    const delay = Math.max(this.o.minDelayMs, policy ? crawlDelayMs(policy, this.o.robotsToken) ?? 0 : 0);
 
     await events.emit(id, "page.fetching", { url: item.url, depth: item.depth, path_score: item.path_score }, false);
     const r = await fetchUrl(item.url, {
       userAgent: this.o.userAgent,
+      standardAgentOrigins: this.standardAgentOrigins,
+      fallbackDelayMs: Math.max(1000, delay),
+      beforeStandardAgentRequest: async (url) => {
+        if (!state.crawl.respect_robots) return null;
+        const rules = await this.robotsFor(url);
+        return isAllowed(rules, url, this.o.robotsToken) && isAllowed(rules, url, "node") ? null : "robots.txt (standard HTTP client)";
+      },
+      onUserAgentFallback: async (url) => {
+        await events.emit(id, "page.retrying", { url, status: 403, reason: "configured User-Agent refused; retrying with the standard HTTP client" });
+      },
       beforeRedirect: async (_from, to) => {
         const next = normalizeUrl(to);
         if (!next) return "invalid redirect";
@@ -343,6 +362,7 @@ export class CrawlRunner {
           await repo.addExtraHost(db, id, hostOf(next));
           await events.emit(id, "scope.added", { host: hostOf(next), reason: "the start page redirects there" });
         }
+        if (!state.crawl.respect_robots) return null;
         const p = await this.robotsFor(next);
         return isAllowed(p, next, this.o.robotsToken) ? null : "robots.txt (redirect target)";
       },
@@ -360,6 +380,13 @@ export class CrawlRunner {
 
     if (r.error && r.status >= 300 && r.status < 400) {
       await repo.finishItem(db, id, item.url_hash, "skipped", r.status, r.error);
+      await events.emit(id, "page.skipped", { url: item.url, reason: r.error });
+      return;
+    }
+
+    if (r.error?.startsWith("robots.txt")) {
+      await repo.finishItem(db, id, item.url_hash, "skipped", null, r.error);
+      if (item.depth === 0) state.seedOutcome = { status: 0, reason: "robots.txt" };
       await events.emit(id, "page.skipped", { url: item.url, reason: r.error });
       return;
     }
@@ -419,7 +446,7 @@ export class CrawlRunner {
     ) {
       state.renders++;
       state.renderedUrls.add(finalUrl);
-      const rr = await this.renderPage(renderer, item, finalUrl);
+      const rr = await this.renderPage(renderer, item, finalUrl, state.crawl.respect_robots);
       if (rr.ok && rr.html) {
         const $r = parseHtml(rr.html);
         const pr = extractPage($r, finalUrl);
@@ -460,7 +487,7 @@ export class CrawlRunner {
     /** Where a person reading the results should go: the original, not the mirror copy. */
     const shownUrl = mirror ? page.canonical! : finalUrl;
     const xRobots = (r.headers["x-robots-tag"] ?? "").toLowerCase();
-    const nofollow = page.metaNofollow || /\b(nofollow|none)\b/.test(xRobots);
+    const nofollow = state.crawl.respect_robots && (page.metaNofollow || /\b(nofollow|none)\b/.test(xRobots));
 
     const pageId = await repo.upsertPage(db, {
       hash: item.url_hash,
@@ -578,19 +605,20 @@ export class CrawlRunner {
       contacts: contacts.length,
       needs_browser: (needsBrowser && !rendered) || undefined,
       rendered: rendered || undefined,
+      user_agent_fallback: r.userAgentFallback || undefined,
     });
   }
 
   /**
    * Opens one page in the browser as one polite visit: it holds the site's lease like a fetch,
-   * and the browser may load a page or data URL only where robots.txt allows this bot.
+   * applying the crawl's robots.txt setting to browser pages and data requests too.
    */
-  private async renderPage(renderer: Renderer, item: repo.FrontierItem, url: string): Promise<RenderResult> {
+  private async renderPage(renderer: Renderer, item: repo.FrontierItem, url: string, respectRobots: boolean): Promise<RenderResult> {
     const { db } = this.o;
     if (!(await repo.acquireSite(db, item.host))) return { ok: false, reason: "the site stayed busy", ms: 0, requests: 0 };
     let rr: RenderResult | undefined;
     try {
-      rr = await renderer.render(url, async (u) => isAllowed(await this.robotsFor(u), u, this.o.robotsToken));
+      rr = await renderer.render(url, async (u) => !respectRobots || isAllowed(await this.robotsFor(u), u, this.o.robotsToken));
       return rr;
     } finally {
       // A 429 or 503 in the browser means slow down, exactly as for a fetch.
@@ -618,7 +646,7 @@ export class CrawlRunner {
       }
       const trap = inside ? trapReason(link.url) : null;
       const tooDeep = item.depth + 1 > state.crawl.max_depth;
-      const reason = !inside ? "out of scope" : trap ? `trap: ${trap}` : tooDeep ? "beyond max depth" : link.nofollow ? "rel=nofollow" : null;
+      const reason = !inside ? "out of scope" : trap ? `trap: ${trap}` : tooDeep ? "beyond max depth" : state.crawl.respect_robots && link.nofollow ? "rel=nofollow" : null;
       rows.push({
         hash: urlHash(link.url),
         url: link.url,

@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { fetchUrl } from "./fetcher.js";
+import { fetchUrl, type FetchOptions } from "./fetcher.js";
 
 interface Robot {
   isAllowed(url: string, ua?: string): boolean | undefined;
@@ -57,9 +57,10 @@ export interface RobotsFetch {
 }
 
 /** Fetches /robots.txt for the URL's host (up to five redirects, 500 KiB) and turns it into a policy. */
-export async function fetchRobots(anyUrl: string, userAgent: string): Promise<RobotsFetch> {
+export async function fetchRobots(anyUrl: string, userAgent: string, options: Pick<FetchOptions, "standardAgentOrigins" | "fallbackDelayMs"> = {}): Promise<RobotsFetch> {
   const robotsUrl = robotsUrlFor(anyUrl);
   const r = await fetchUrl(robotsUrl, {
+    ...options,
     userAgent,
     timeoutMs: 10_000,
     maxBytes: ROBOTS_MAX_BYTES,

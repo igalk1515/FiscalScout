@@ -155,8 +155,9 @@
     const on = (type, fn) => es.addEventListener(type, (m) => fn(JSON.parse(m.data)));
     // A finished crawl's counters are drawn before its stored events replay: redraw them once
     // the start event says whether the LLM was on.
-    on("crawl.started", (d) => { llmOn = !!d.llm; if (lastCounters) setCounters(lastCounters); if (!finishedAt) setStatus("running"); addRow("start", "ok", "", d.seed, `depth ${d.max_depth} · budget ${d.page_budget}`); });
+    on("crawl.started", (d) => { llmOn = !!d.llm; if (lastCounters) setCounters(lastCounters); if (!finishedAt) setStatus("running"); addRow("start", "ok", "", d.seed, `depth ${d.max_depth} · budget ${d.page_budget} · robots ${d.respect_robots === false ? "off" : "on"} · LLM ${d.llm || "off"}`); });
     on("page.fetching", (d) => { $("now").textContent = `${shortUrl(d.url)}   depth ${d.depth} · path ${Number(d.path_score).toFixed(2)}`; });
+    on("page.retrying", (d) => addRow("retry", "warn", d.status, d.url, d.reason, "warn"));
     on("page.fetched", (d) => addRow(d.status, "ok", d.ms + " ms", d.url,
       d.document ? `document (${d.document})` : d.duplicate ? "same content" : `${d.links} links${d.results ? " · " + d.results + " results" : ""}${d.needs_browser ? " · needs browser" : ""}`));
     on("page.failed", (d) => {

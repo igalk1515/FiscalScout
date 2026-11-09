@@ -52,6 +52,8 @@ async function crawlView(ctx: AppContext, c: repo.CrawlRow): Promise<z.infer<typ
     keywords: c.keywords,
     max_depth: c.max_depth,
     page_budget: c.page_budget,
+    respect_robots: c.respect_robots,
+    use_llm: c.use_llm,
     extra_hosts: c.extra_hosts,
     counters: {
       pages_done: k.pages_done,
@@ -112,6 +114,8 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
         keywords: req.body.keywords,
         maxDepth: req.body.max_depth,
         pageBudget: req.body.page_budget,
+        respectRobots: req.body.respect_robots,
+        useLlm: req.body.use_llm,
         idempotencyKey: req.headers["idempotency-key"] ?? null,
       });
       if (!created) reply.header("idempotent-replayed", "true");
@@ -386,7 +390,7 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
         tags: ["crawls"],
         summary: "Live stream of the crawl (Server-Sent Events)",
         description:
-          "text/event-stream. Sends the stored history first, then new events as they happen. Reconnects resume from Last-Event-ID. Event types: crawl.started, page.fetching, page.fetched, page.failed, page.skipped, page.rendered, page.render_failed, link.found, contact.found, scope.added, scope.mirror, host.paused, llm.capped, stats, crawl.done, crawl.blocked, crawl.failed, crawl.cancelled, crawl.rescored.",
+          "text/event-stream. Sends the stored history first, then new events as they happen. Reconnects resume from Last-Event-ID. Event types: crawl.started, page.fetching, page.retrying, page.fetched, page.failed, page.skipped, page.rendered, page.render_failed, link.found, contact.found, scope.added, scope.mirror, host.paused, llm.capped, stats, crawl.done, crawl.blocked, crawl.failed, crawl.cancelled, crawl.rescored.",
         params: IdParams,
         querystring: EventsQuery,
       },

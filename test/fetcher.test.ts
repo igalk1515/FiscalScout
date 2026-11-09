@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { fetchUrl, isRetryable } from "../src/crawler/fetcher.js";
 import { html, redirect, startServer, text } from "./helpers/server.js";
 
@@ -20,6 +20,15 @@ beforeAll(async () => {
     "/doc.pdf": text("%PDF-1.4 fake", 200, "application/pdf"),
     "/big": html("x".repeat(200_000)),
     "/gone": html("gone", 404),
+    "/forbidden": html("Access Denied", 403),
+    "/auth": html("Sign in", 401),
+    "/agent-sensitive": (req, res) => {
+      html(req.headers["user-agent"] === UA ? "Access Denied" : "Public financial reports", req.headers["user-agent"] === UA ? 403 : 200)(req, res);
+    },
+    "/agent-redirect": (req, res) => {
+      if (req.headers["user-agent"] === UA) return html("Access Denied", 403)(req, res);
+      redirect("/agent-sensitive")(req, res);
+    },
     "/busy": (_req, res) => {
       res.writeHead(503, { "retry-after": "7", "content-type": "text/html" });
       res.end("busy");
@@ -87,5 +96,66 @@ describe("fetchUrl", () => {
     expect(busy.status).toBe(503);
     expect(isRetryable(busy)).toBe(true);
     expect(busy.retryAfterMs).toBe(7000);
+  });
+
+  it("recovers a User-Agent-specific 403 once and reuses the successful identity on that origin", async () => {
+    const standardAgentOrigins = new Set<string>();
+    const retry = vi.fn(async () => {});
+    const before = site.hits.length;
+    const options = { userAgent: UA, standardAgentOrigins, fallbackDelayMs: 0, onUserAgentFallback: retry };
+    const first = await fetchUrl(`${site.url}/agent-sensitive`, options);
+    expect(first).toMatchObject({ status: 200, userAgentFallback: true });
+    expect(first.body?.toString()).toContain("Public financial reports");
+    expect(standardAgentOrigins).toEqual(new Set([site.url]));
+    expect((await fetchUrl(`${site.url}/agent-sensitive`, options)).status).toBe(200);
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(site.hits.slice(before)).toHaveLength(3);
+  });
+
+  it("keeps a genuine 403 blocked after one fallback and does not remember a failed identity", async () => {
+    const standardAgentOrigins = new Set<string>();
+    const before = site.hits.length;
+    const r = await fetchUrl(`${site.url}/forbidden`, { userAgent: UA, fallbackDelayMs: 0, standardAgentOrigins });
+    expect(r.status).toBe(403);
+    expect(isRetryable(r)).toBe(false);
+    expect(site.hits.slice(before)).toEqual(["/forbidden", "/forbidden"]);
+    expect(standardAgentOrigins.size).toBe(0);
+  });
+
+  it("does not change identity for authentication failures or rate limits", async () => {
+    const retry = vi.fn(async () => {});
+    const before = site.hits.length;
+    for (const path of ["/auth", "/gone", "/busy"]) {
+      await fetchUrl(`${site.url}${path}`, { userAgent: UA, onUserAgentFallback: retry });
+    }
+    expect(retry).not.toHaveBeenCalled();
+    expect(site.hits.slice(before)).toEqual(["/auth", "/gone", "/busy"]);
+  });
+
+  it("checks policy before both new and remembered standard-agent requests", async () => {
+    const before = site.hits.length;
+    const beforeStandardAgentRequest = async () => "robots.txt (standard HTTP client)";
+    const first = await fetchUrl(`${site.url}/agent-sensitive`, { userAgent: UA, fallbackDelayMs: 0, beforeStandardAgentRequest });
+    expect(first.error).toBe("robots.txt (standard HTTP client)");
+    const cached = await fetchUrl(`${site.url}/agent-sensitive`, { userAgent: UA, standardAgentOrigins: new Set([site.url]), beforeStandardAgentRequest });
+    expect(cached.error).toBe(first.error);
+    expect(site.hits.slice(before)).toHaveLength(1);
+  });
+
+  it("keeps the redirect budget and redirect checks across a fallback", async () => {
+    const beforeRedirect = vi.fn(async () => null);
+    const r = await fetchUrl(`${site.url}/agent-redirect`, { userAgent: UA, maxRedirects: 1, fallbackDelayMs: 0, beforeRedirect });
+    expect(r.status).toBe(200);
+    expect(r.redirects).toEqual([`${site.url}/agent-sensitive`]);
+    expect(beforeRedirect).toHaveBeenCalledTimes(1);
+    const stopped = await fetchUrl(`${site.url}/agent-redirect`, { userAgent: UA, maxRedirects: 0, fallbackDelayMs: 0 });
+    expect(stopped.error).toBe("too many redirects");
+  });
+
+  it("includes the fallback delay in the overall timeout", async () => {
+    const before = site.hits.length;
+    const r = await fetchUrl(`${site.url}/agent-sensitive`, { userAgent: UA, timeoutMs: 100, fallbackDelayMs: 1000 });
+    expect(r.error).toBe("timeout");
+    expect(site.hits.slice(before)).toHaveLength(1);
   });
 });

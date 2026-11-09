@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+
 // Load .env when present. Real environment variables win over the file.
 try {
   process.loadEnvFile(".env");
@@ -20,8 +22,7 @@ const Env = z.object({
   OPENAI_BASE_URL: z.string().default("https://api.openai.com/v1"),
   /** Hard cap on LLM spend per crawl. Past it, the crawl continues on rules alone. */
   LLM_MAX_USD_PER_CRAWL: z.coerce.number().min(0).default(0.5),
-  BOT_NAME: z.string().default("HighValueLinkScraper/0.1"),
-  BOT_URL: z.string().default("https://github.com/igalk1515/high-value-link-scraper"),
+  HTTP_USER_AGENT: z.string().trim().min(1).default(DEFAULT_USER_AGENT),
   CRAWL_WORKERS: z.coerce.number().int().min(1).max(16).default(3),
   MIN_HOST_DELAY_MS: z.coerce.number().int().min(0).default(1000),
   /**
@@ -45,8 +46,12 @@ export type Config = z.infer<typeof Env>;
 
 export const config: Config = Env.parse(process.env);
 
-/** Honest identification: the bot's name and a page that explains it. */
-export const userAgent = `${config.BOT_NAME} (+${config.BOT_URL})`;
+/** The configured request header, shared by HTTP fetches, robots.txt and browser rendering. */
+export const userAgent = config.HTTP_USER_AGENT;
+
+export function robotsTokenFor(agent: string): string {
+  return agent.split(/[\/\s]/, 1)[0]!;
+}
 
 /** The product token robots.txt groups are matched against. */
-export const robotsToken = config.BOT_NAME.split("/")[0]!;
+export const robotsToken = robotsTokenFor(userAgent);

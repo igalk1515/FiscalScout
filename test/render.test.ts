@@ -127,7 +127,7 @@ describe.skipIf(!browserAvailable)("render tier: pages drawn by scripts", () => 
   let site: Awaited<ReturnType<typeof startScriptSite>>;
   const contexts: AppContext[] = [];
 
-  async function crawl(config: Record<string, unknown>) {
+  async function crawl(config: Record<string, unknown>, respectRobots = true) {
     site.hits.length = 0;
     const ctx = await createContext({
       db,
@@ -136,7 +136,7 @@ describe.skipIf(!browserAvailable)("render tier: pages drawn by scripts", () => 
       config: { CRAWL_WORKERS: 2, MIN_HOST_DELAY_MS: 20, RAW_DIR: mkdtempSync(join(tmpdir(), "raw-")), BROWSER_CHANNEL: BROWSER.channel, BROWSER_EXECUTABLE: BROWSER.executablePath, ...config },
     });
     contexts.push(ctx);
-    const { crawl } = await startCrawl(ctx, { url: `${site.url}/`, maxDepth: 3, pageBudget: 30 });
+    const { crawl } = await startCrawl(ctx, { url: `${site.url}/`, maxDepth: 3, pageBudget: 30, respectRobots });
     await ctx.runner.start(crawl.id);
     const events = (await db.query("select type, data from crawl_events where crawl_id = $1 order by id", [crawl.id])).rows as { type: string; data: Record<string, unknown> }[];
     return { id: crawl.id, events, hits: [...site.hits] };
@@ -185,7 +185,7 @@ describe.skipIf(!browserAvailable)("render tier: pages drawn by scripts", () => 
       expect(check.rows[0].rendered).toBe(false);
       const refusedInBrowser = run.events.some((e) => e.type.startsWith("page.render") && String(e.data.url).endsWith("/refused"));
       expect(refusedInBrowser).toBe(false);
-      expect(run.hits.filter((h) => h === "/refused")).toHaveLength(1); // the one plain fetch, never retried
+      expect(run.hits.filter((h) => h === "/refused")).toHaveLength(2); // plain fetch and standard-agent fallback, no browser
     });
 
     it("opens each page in the browser once, however many links lead to it, and never a sign-in page", () => {
@@ -225,5 +225,11 @@ describe.skipIf(!browserAvailable)("render tier: pages drawn by scripts", () => 
       const run = await crawl({ RENDER_JS: true, RENDER_MAX_PER_CRAWL: 1 });
       expect(run.events.filter((e) => e.type === "page.rendered" || e.type === "page.render_failed")).toHaveLength(1);
     });
+  });
+
+  it("applies a crawl's robots opt-out to browser data requests", async () => {
+    const run = await crawl({ RENDER_JS: true, RENDER_MAX_PER_CRAWL: 1 }, false);
+    expect(run.hits).toContain("/private/data");
+    expect(run.hits).not.toContain("/robots.txt");
   });
 });

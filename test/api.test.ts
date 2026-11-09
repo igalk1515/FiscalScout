@@ -47,7 +47,7 @@ describe("POST /v1/crawls", () => {
     const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}/finance`, max_depth: 0 } });
     expect(res.statusCode).toBe(202);
     const body = res.json();
-    expect(body).toMatchObject({ status: "queued", max_depth: 0, page_budget: 300 });
+    expect(body).toMatchObject({ status: "queued", max_depth: 0, page_budget: 300, respect_robots: true, use_llm: false });
     expect(body.links.live).toBe(`/live/${body.id}`);
     expect(res.headers.location).toBe(`/v1/crawls/${body.id}`);
     await ctx.runner.start(body.id);
@@ -64,6 +64,12 @@ describe("POST /v1/crawls", () => {
     });
     expect(bad.statusCode).toBe(400);
     expect(bad.json().error.param).toBe("keywords.budget.weight");
+  });
+
+  it.each(["respect_robots", "use_llm"])("rejects a non-boolean %s option", async (option) => {
+    const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}/`, [option]: "false" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.param).toBe(option);
   });
 
   it("replays the same crawl for the same Idempotency-Key", async () => {

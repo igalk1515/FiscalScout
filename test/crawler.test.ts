@@ -209,7 +209,7 @@ describe("LLM spending cap", () => {
 });
 
 describe("a blocked site", () => {
-  it("is reported as blocked after one refused request, never bypassed", async () => {
+  it("is reported as blocked when the standard HTTP client is also refused", async () => {
     const { startServer, html, text } = await import("./helpers/server.js");
     const blocked = await startServer({
       "/robots.txt": text("forbidden", 403),
@@ -220,7 +220,7 @@ describe("a blocked site", () => {
     const done = await repo.getCrawl(db, crawl.id);
     expect(done!.status).toBe("blocked");
     expect(done!.status_detail).toMatch(/HTTP 403/);
-    expect(blocked.hits).toEqual(["/robots.txt", "/"]);
+    expect(blocked.hits).toEqual(["/robots.txt", "/robots.txt", "/", "/"]);
     await blocked.close();
   });
 });

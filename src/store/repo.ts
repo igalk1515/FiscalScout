@@ -23,6 +23,8 @@ export interface CrawlRow {
   keywords: KeywordConfig;
   max_depth: number;
   page_budget: number;
+  respect_robots: boolean;
+  use_llm: boolean;
   status: CrawlStatus;
   status_detail: string | null;
   scope_domain: string;
@@ -45,6 +47,8 @@ export interface NewCrawl {
   keywords: KeywordConfig;
   maxDepth: number;
   pageBudget: number;
+  respectRobots?: boolean;
+  useLlm?: boolean;
   scopeDomain: string;
   rankerVersion: string;
   idempotencyKey?: string | null;
@@ -63,11 +67,11 @@ export async function createCrawl(
   return tx(db, async (client) => {
     const id = randomUUID();
     const inserted = await client.query<CrawlRow>(
-      `insert into crawls (id, seed_url, keywords, max_depth, page_budget, scope_domain, ranker_version, idempotency_key)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
+      `insert into crawls (id, seed_url, keywords, max_depth, page_budget, scope_domain, ranker_version, idempotency_key, respect_robots, use_llm)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        on conflict (idempotency_key) do nothing
        returning *`,
-      [id, c.seedUrl, JSON.stringify(c.keywords), c.maxDepth, c.pageBudget, c.scopeDomain, c.rankerVersion, c.idempotencyKey ?? null],
+      [id, c.seedUrl, JSON.stringify(c.keywords), c.maxDepth, c.pageBudget, c.scopeDomain, c.rankerVersion, c.idempotencyKey ?? null, c.respectRobots ?? true, c.useLlm ?? true],
     );
     if (!inserted.rows[0]) {
       const again = await client.query<CrawlRow>("select * from crawls where idempotency_key = $1", [c.idempotencyKey]);
