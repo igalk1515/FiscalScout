@@ -155,6 +155,8 @@
       addRow(d.retrying ? "retry" : broken ? "broken" : "fail", d.retrying ? "warn" : "bad", d.status || "", d.url, note, d.retrying ? "warn" : "bad");
     });
     on("scope.mirror", (d) => addRow("mirror", "ok", "", d.host, `a copy of ${d.same_as}: read there instead`));
+    on("page.rendered", (d) => addRow("render", "ok", d.ms + " ms", d.url, `opened in the browser · ${d.links} links · ${d.requests} requests${d.used ? "" : " · nothing new"}`));
+    on("page.render_failed", (d) => addRow("render", "bad", "", d.url, d.reason, "bad"));
     on("page.skipped", (d) => addRow("skip", "warn", "", d.url, d.reason, "muted"));
     on("scope.added", (d) => addRow("scope", "ok", "", d.host, d.reason));
     on("host.paused", (d) => addRow("pause", "bad", "", d.host, `paused after errors · ${d.skipped} skipped`, "bad"));

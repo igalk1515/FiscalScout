@@ -242,10 +242,28 @@ Igal watched a new Boerne crawl in the live view and asked three questions. Each
   in a counter of their own, a list in the live view with the page each was found on, and
   `/v1/crawls/{id}/pages?status=broken`. Every counter in the live view explains itself on hover.
 
+## Step 13 · Render tier
+
+A headless browser for pages that arrive as an empty shell (`playwright-core`, driving a browser
+already on the machine: Edge here, Chromium in the Docker image when built with
+`WITH_BROWSER=1`). Off by default (`RENDER_JS`). Rules, all tested:
+
+- only pages on the entity's own site that answered 200 and were flagged `needs_browser`;
+- at most 20 per crawl; one visit holds the site's lease like a fetch;
+- pages and data calls inside the browser are checked against robots.txt;
+- images, fonts and styles are not loaded; at most 60 requests per page;
+- a page that refused us is never opened; a bot-check page is reported and not used.
+
+The first real run flagged Boerne's jobs site as a bot check: the page loads fully but carries
+Imperva's monitoring script, and the check matched its name. A marker now counts only when the
+page has almost no content of its own; a test covers the case. Rendered again, the page took
+2.4 seconds and 48 requests and gave the three HR specialists with email and phone (with an
+"HR specialist" contact keyword; the default keywords do not ask for HR).
+
+Docker: the default image stays 346 MB; with the browser it is 1.48 GB, and a script-built page
+renders inside the container.
+
 ## Not done
 
-- **Step 13, if time:** a headless browser for pages drawn entirely by scripts. Not needed for
-  the test sites: ASU's menu was bypassed through the footer and page JSON, and ClearGov's
-  budget is found as a link. Script-built pages are flagged `needs_browser`.
 - **GitHub:** creating the public repository was refused by the permission system on this
   machine, so the code is committed locally only.

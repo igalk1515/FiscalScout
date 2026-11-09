@@ -24,6 +24,20 @@ const Env = z.object({
   BOT_URL: z.string().default("https://github.com/igalk1515/high-value-link-scraper"),
   CRAWL_WORKERS: z.coerce.number().int().min(1).max(16).default(3),
   MIN_HOST_DELAY_MS: z.coerce.number().int().min(0).default(1000),
+  /**
+   * Render tier: open pages drawn entirely by scripts in a headless browser. Off by default.
+   * Only pages on the entity's own site that answered 200 with an empty shell are rendered;
+   * a page that refused us is never opened in a browser.
+   */
+  RENDER_JS: z
+    .string()
+    .optional()
+    .transform((v) => ["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase())),
+  RENDER_MAX_PER_CRAWL: z.coerce.number().int().min(0).default(20),
+  RENDER_TIMEOUT_MS: z.coerce.number().int().min(1000).default(20000),
+  /** A browser already on the machine: "msedge" or "chrome", or a path to the executable. */
+  BROWSER_CHANNEL: z.string().optional(),
+  BROWSER_EXECUTABLE: z.string().optional(),
   LOG_LEVEL: z.string().default("info"),
 });
 

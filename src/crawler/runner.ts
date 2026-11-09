@@ -10,6 +10,7 @@ import * as repo from "../store/repo.js";
 import { extractPage, parseHtml, type LinkCandidate } from "./extract.js";
 import { fetchUrl, isRetryable } from "./fetcher.js";
 import { saveRaw } from "./rawstore.js";
+import type { Renderer, RenderResult } from "./render.js";
 import { crawlDelayMs, fetchRobots, isAllowed, policyFromResponse, robotsUrlFor, type RobotsPolicy } from "./robots.js";
 import {
   type CrawlScope,
@@ -45,6 +46,10 @@ export interface RunnerOptions {
   maxAttempts?: number;
   /** Hard cap on LLM spend per crawl, in dollars. */
   llmMaxUsdPerCrawl?: number;
+  /** The render tier, when RENDER_JS is on: a headless browser for pages drawn by scripts. */
+  renderer?: Renderer | null;
+  /** Most pages one crawl may open in the browser. */
+  renderMaxPerCrawl?: number;
 }
 
 interface CrawlState {
@@ -60,6 +65,8 @@ interface CrawlState {
    * seed points to. These are not held to the per-host share of the budget.
    */
   mainHosts: Set<string>;
+  /** Pages opened in the browser so far. */
+  renders: number;
   seedOutcome: { status: number; reason: string } | null;
   llmCalls: number;
   llmCost: number;
@@ -134,6 +141,7 @@ export class CrawlRunner {
       contentHashes: new Set(),
       mirrors: new Map(),
       mainHosts: new Set([hostOf(crawl.seed_url)]),
+      renders: 0,
       seedOutcome: null,
       llmCalls: 0,
       llmCost: 0,
@@ -351,9 +359,30 @@ export class CrawlRunner {
     const contentHash = createHash("sha256").update(r.body).digest();
     let duplicate: string | null = state.contentHashes.has(contentHash.toString("hex")) ? "same content as a page already read" : null;
     state.contentHashes.add(contentHash.toString("hex"));
-    const rawPath = await saveRaw(this.o.rawDir, item.url_hash, r.body);
-    const $ = parseHtml(r.body.toString("utf8"));
-    const page = extractPage($, finalUrl);
+    let rawPath = await saveRaw(this.o.rawDir, item.url_hash, r.body);
+    let $ = parseHtml(r.body.toString("utf8"));
+    let page = extractPage($, finalUrl);
+    const needsBrowser = page.thin;
+
+    // Render tier: an empty shell on the entity's own site that answered 200 is opened in the
+    // browser, within the crawl's render budget. Anything that refused us never gets here.
+    let rendered = false;
+    const { renderer } = this.o;
+    if (needsBrowser && renderer && r.status === 200 && inScope(finalUrl, scope) && state.renders < (this.o.renderMaxPerCrawl ?? 20)) {
+      state.renders++;
+      const rr = await this.renderPage(renderer, item, finalUrl);
+      if (rr.ok && rr.html) {
+        const $r = parseHtml(rr.html);
+        const pr = extractPage($r, finalUrl);
+        if (pr.links.length > page.links.length || pr.visibleTextLength > page.visibleTextLength) {
+          [$, page, rendered] = [$r, pr, true];
+          rawPath = await saveRaw(this.o.rawDir, item.url_hash, Buffer.from(rr.html, "utf8"));
+        }
+        await events.emit(id, "page.rendered", { url: finalUrl, ms: rr.ms, requests: rr.requests, links: pr.links.length, used: rendered });
+      } else {
+        await events.emit(id, "page.render_failed", { url: finalUrl, reason: rr.reason });
+      }
+    }
 
     // The same site under a second host name: its pages name the original as canonical.
     // Learn the mirror once, then read every URL on it under the original host.
@@ -395,7 +424,8 @@ export class CrawlRunner {
       bytes: r.bytes,
       title: page.title || null,
       rawPath,
-      needsBrowser: page.thin,
+      needsBrowser,
+      rendered,
     });
 
     if (duplicate) {
@@ -497,8 +527,25 @@ export class CrawlRunner {
       links: page.links.length,
       results: results.length,
       contacts: contacts.length,
-      needs_browser: page.thin || undefined,
+      needs_browser: (needsBrowser && !rendered) || undefined,
+      rendered: rendered || undefined,
     });
+  }
+
+  /**
+   * Opens one page in the browser as one polite visit: it holds the site's lease like a fetch,
+   * and the browser may load a page or data URL only where robots.txt allows this bot.
+   */
+  private async renderPage(renderer: Renderer, item: repo.FrontierItem, url: string): Promise<RenderResult> {
+    const { db } = this.o;
+    if (!(await repo.acquireSite(db, item.host))) return { ok: false, reason: "the site stayed busy", ms: 0, requests: 0 };
+    let rr: RenderResult | undefined;
+    try {
+      rr = await renderer.render(url, async (u) => isAllowed(await this.robotsFor(u), u, this.o.robotsToken));
+      return rr;
+    } finally {
+      await repo.releaseHost(db, item.host, Math.max(this.o.minDelayMs, Math.min(10_000, rr?.ms ?? 0)), "ok");
+    }
   }
 
   private async enqueueLinks(state: CrawlState, item: repo.FrontierItem, pages: { link: LinkCandidate; s: LinkScore }[]) {

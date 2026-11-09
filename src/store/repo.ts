@@ -394,19 +394,39 @@ export interface PageRecord {
   title: string | null;
   rawPath: string | null;
   needsBrowser: boolean;
+  /** The page was opened in the headless browser and the stored HTML is the rendered one. */
+  rendered?: boolean;
 }
 
 export async function upsertPage(db: Db, p: PageRecord): Promise<number> {
   const r = await db.query<{ id: number }>(
-    `insert into pages (url_hash, url, final_url, host, http_status, content_type, content_hash, bytes, title, raw_path, needs_browser, fetched_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+    `insert into pages (url_hash, url, final_url, host, http_status, content_type, content_hash, bytes, title, raw_path, needs_browser, rendered, fetched_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
      on conflict (url_hash) do update set final_url = $3, http_status = $5, content_type = $6, content_hash = $7,
-       bytes = $8, title = $9, raw_path = $10, needs_browser = $11, fetched_at = now()
+       bytes = $8, title = $9, raw_path = $10, needs_browser = $11, rendered = $12, fetched_at = now()
      returning id`,
-    [p.hash, p.url, p.finalUrl, p.host, p.status, p.contentType, p.contentHash, p.bytes, p.title, p.rawPath, p.needsBrowser],
+    [p.hash, p.url, p.finalUrl, p.host, p.status, p.contentType, p.contentHash, p.bytes, p.title, p.rawPath, p.needsBrowser, p.rendered ?? false],
   );
   if (p.needsBrowser) await db.query("update links set needs_browser = true where url_hash = $1", [p.hash]);
   return r.rows[0]!.id;
+}
+
+/**
+ * Takes the site's lease for a request made outside the queue (opening a page in the browser),
+ * waiting up to maxWaitMs for the site to be free. Release it with releaseHost.
+ */
+export async function acquireSite(db: Db, host: string, maxWaitMs = 60_000): Promise<boolean> {
+  const until = Date.now() + maxWaitMs;
+  while (Date.now() < until) {
+    const r = await db.query(
+      `update sites s set next_allowed_at = now() + interval '10 minutes'
+       from hosts h where h.host = $1 and s.site = h.site and s.next_allowed_at <= now()`,
+      [host],
+    );
+    if (r.rowCount) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
 }
 
 export interface LinkRecord {

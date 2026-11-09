@@ -17,11 +17,15 @@ services:
       retries: 30
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        WITH_BROWSER: ${WITH_BROWSER:-0}
     environment:
       DATABASE_URL: postgres://scraper:scraper@db:5432/scraper
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      RENDER_JS: ${RENDER_JS:-false}
       PORT: "3000"
       RAW_DIR: /data/raw
     ports:

@@ -1,5 +1,6 @@
 import { pino } from "pino";
 import { type Config, config as defaultConfig, robotsToken, userAgent } from "./config.js";
+import { Renderer } from "./crawler/render.js";
 import { CrawlRunner, type Logger } from "./crawler/runner.js";
 import { hostOf, normalizeUrl, registrableDomain, urlHash } from "./crawler/url.js";
 import { createDb, type Db } from "./db/client.js";
@@ -44,6 +45,15 @@ export async function createContext(overrides: ContextOverrides = {}): Promise<A
       cache: dbCache(db),
       onError: (m) => log.warn({ llm: m }, "LLM call failed; rules score kept"),
     });
+  // The render tier starts a browser only when the first page needs it.
+  const renderer = config.RENDER_JS
+    ? new Renderer({
+        userAgent,
+        timeoutMs: config.RENDER_TIMEOUT_MS,
+        channel: config.BROWSER_CHANNEL,
+        executablePath: config.BROWSER_EXECUTABLE,
+      })
+    : null;
   const runner = new CrawlRunner({
     db,
     events,
@@ -54,6 +64,8 @@ export async function createContext(overrides: ContextOverrides = {}): Promise<A
     workers: config.CRAWL_WORKERS,
     minDelayMs: config.MIN_HOST_DELAY_MS,
     llmMaxUsdPerCrawl: config.LLM_MAX_USD_PER_CRAWL,
+    renderer,
+    renderMaxPerCrawl: config.RENDER_MAX_PER_CRAWL,
     log,
   });
   return {
@@ -65,6 +77,7 @@ export async function createContext(overrides: ContextOverrides = {}): Promise<A
     log,
     async close() {
       await runner.stop();
+      await renderer?.close();
       await events.close();
       if (!overrides.db) await db.end();
     },

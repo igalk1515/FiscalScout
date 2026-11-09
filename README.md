@@ -77,6 +77,16 @@ An LLM key is optional. Without it, everything runs on rules alone:
 OPENAI_API_KEY=sk-... docker compose up --build
 ```
 
+The render tier for pages drawn by scripts needs a browser in the image (about 1.5 GB instead
+of 350 MB), so it is opt-in:
+
+```bash
+WITH_BROWSER=1 RENDER_JS=true docker compose up --build
+```
+
+Outside Docker, it uses a browser already on the machine: `RENDER_JS=true BROWSER_CHANNEL=msedge`
+(or `chrome`), or `BROWSER_EXECUTABLE=/path/to/chromium`.
+
 ### Local development
 
 ```bash
@@ -238,6 +248,17 @@ that JSON too, which is how ASU's CFO is found without a browser.
   found on (`/v1/crawls/{id}/pages?status=broken`, and a list in the live view). Timeouts, network errors, 5xx and 429 are retried up to three
   times with backoff, honoring `Retry-After`. Five errors in a row pause a host. A site that
   refuses automated requests is reported as `blocked` and never bypassed.
+- **Render tier (`RENDER_JS=true`, off by default):** some pages arrive as an empty shell that
+  scripts fill in. The plain fetch flags them `needs_browser`; with the render tier on, such a
+  page is opened in a headless browser and read again. Only pages on the entity's own site that
+  answered 200 are rendered, at most `RENDER_MAX_PER_CRAWL` (20) per crawl. A render is one polite
+  visit: it holds the site's lease like a fetch, uses the same honest User-Agent, loads no
+  images, fonts or styles, caps a page at 60 requests, and the browser may load a page or data
+  URL only where robots.txt allows this bot. A page that refused us (401, 403, 429) is never
+  opened in the browser, and a page that shows a bot check is reported and left alone; a
+  bot-protection script on a page that loaded fully is not a check. Each page gets a fresh browser
+  context, so no cookies carry over. Example: Boerne's jobs site on SchoolSpring is an empty
+  shell to a plain fetch; rendered in 2.4 seconds, it lists the district's HR contacts.
 - **Honest identity:** `User-Agent: HighValueLinkScraper/0.1 (+https://github.com/igalk1515/high-value-link-scraper)`.
 
 ---
@@ -384,7 +405,7 @@ raw pages are gzip files on disk keyed by URL hash, outside the database.
 
 ## Tests
 
-`npm test` runs 100+ tests:
+`npm test` runs 120+ tests:
 
 - **Unit:** URL normalization and scope, trap guards, the RFC 9309 examples, the fetcher (redirects,
   loops, size cap, timeouts, retry rules), keyword matching, fiscal years, rules scoring and
@@ -392,7 +413,10 @@ raw pages are gzip files on disk keyed by URL hash, outside the database.
 - **Integration** (needs the db container): a full crawl of a fake city website with every hard
   case (robots.txt, traps, a flaky page, a 404, a redirect, an opaque document URL, a contact,
   a blocked site), checking that no host ever gets two requests at once; and the API end to end,
-  including validation, idempotency, pagination, full-text search and the SSE stream.
+  including validation, idempotency, pagination, full-text search and the SSE stream; a site
+  served under two host names (mirror detection); and the render tier against a site drawn
+  entirely by scripts, with a robots.txt rule for a data URL, a bot-check page and a refused page.
+  The render tests use a browser already on the machine and are skipped without one.
 
 `npm run eval` measures the latest crawl of each test site against the hand-made must-find list
 in [eval/must-find.json](eval/must-find.json) and writes [eval/results.md](eval/results.md).
@@ -403,9 +427,9 @@ in [eval/must-find.json](eval/must-find.json) and writes [eval/results.md](eval/
 
 - **Bozeman** refuses every automated request (HTTP 403 from its bot protection, even for
   robots.txt). The crawl is reported as blocked. It is not bypassed.
-- **Pages drawn entirely by scripts**, like the ClearGov budget viewer, are flagged
-  `needs_browser`. The link to them is still found and ranked. A headless browser for those pages
-  is the next step.
+- **Pages drawn entirely by scripts** are read only with the render tier on, and only on the
+  entity's own site. The ClearGov budget viewer sits on ClearGov's host, so it stays a ranked
+  link flagged `needs_browser`. Links that scripts open on click (no `href`) are not followed.
 - **Scanned PDFs** are not read. Documents are ranked by their link, not their content.
 
 ## At scale
