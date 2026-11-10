@@ -1,0 +1,8 @@
+%% Source of docs/images/link-logic.png. Render with any Mermaid tool (fontSize 17px, base theme).
+flowchart LR
+    link["Link: text, URL,<br/>heading, nearby text"] --> signals["22 signals"]
+    signals --> model{{"Learned<br/>weights"}}
+    model --> policy["Year and draft<br/>discounts"]
+    policy --> score(["Target score<br/>+ reasons"])
+    policy -.->|"0.2–0.7, LLM on"| llm["LLM decides"]
+    llm -.-> score

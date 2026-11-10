@@ -1,0 +1,13 @@
+%% Source of docs/images/design-b.png. Render with any Mermaid tool (fontSize 17px, base theme).
+flowchart TB
+    subgraph crawlB ["Crawl"]
+      direction LR
+      sched["Scheduler<br/>recrawl by change rate"] --> queue[["Frontier queue<br/>partitioned by host"]] --> fetch["Fetcher pool"] --> obj[("Object store<br/>raw pages")]
+      fetch -.->|JS-heavy hosts| browser["Browser pool"]
+    end
+    subgraph serveB ["Rank, store and search"]
+      direction LR
+      parse["Parse + rank<br/>learned · vectors · LLM"] --> pg[("Postgres<br/>source of truth")] -->|CDC| search[("Search index<br/>keywords + vectors")] --> apiB["API"]
+      docs["Documents<br/>OCR · chunks"] --> search
+    end
+    crawlB <-->|"raw pages ↓ · unseen links ↑"| serveB

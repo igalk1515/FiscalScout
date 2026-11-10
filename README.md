@@ -25,38 +25,13 @@ Ranks every link with learned weights, and serves the results through a REST API
 One Node process and one Postgres. The crawl queue, the results and the live events all live in
 the same database, so the whole system starts with `docker compose up`.
 
-```mermaid
-flowchart TB
-    api[Fastify API and live view] -->|start a crawl| frontier[(Frontier · Postgres)]
-    frontier -->|claim the best URL| workers[3 async workers · one request per site]
-    workers -->|new links + path score| frontier
-    workers --> raw[(Raw pages · gzip on disk)]
-    workers --> rank{Rank · learned weights}
-    rank -.->|unsure| llm[LLM · optional]
-    rank --> store[(Postgres · links, sightings, contacts)]
-    llm -.-> store
-    store -->|results| api
-```
+<img src="docs/images/design-a.png" alt="Design A: the API starts a crawl; workers take the best URL from a Postgres frontier, one request per site, and save raw pages; every page is ranked with learned weights, the LLM only when unsure, and stored in Postgres" width="100%">
 
 ### Design B · at millions of pages a day
 
 Not built. The same stages, split into pools that scale on their own and talk through queues.
 
-```mermaid
-flowchart TB
-    sched[Scheduler · recrawl by change rate] --> queue[[Frontier queue · partitioned by host]]
-    queue --> fetch[Fetcher pool]
-    fetch -.->|JS-heavy hosts| browser[Browser pool]
-    fetch --> obj[(Object store · raw pages)]
-    obj --> parse[Parse + rank · learned, vectors, LLM]
-    obj --> docs[Documents · OCR, chunks]
-    parse -->|unseen links| queue
-    parse --> pg[(Postgres · source of truth)]
-    pg -->|CDC| search[(Search index · keywords + vectors)]
-    docs --> search
-    pg --> apiB[API]
-    search --> apiB
-```
+<img src="docs/images/design-b.png" alt="Design B: a scheduler feeds a frontier queue partitioned by host; a fetcher pool and a browser pool write raw pages to an object store; parse and rank workers write to Postgres, which feeds a search index through CDC, alongside a document pipeline" width="100%">
 
 | | Design A · built | Design B · at scale |
 |---|---|---|
@@ -75,15 +50,7 @@ Every link gets **two scores**. The **target score** says whether the link is th
 itself: the budget, the ACFR, the finance director's page. The **path score** says whether it
 leads to one. The crawl follows the path score; the results sort by the target score.
 
-```mermaid
-flowchart TB
-    link[Link: text, URL, heading, nearby text] --> signals[22 signals]
-    signals --> model{Learned weights · logistic regression}
-    model --> policy[Year and draft discounts]
-    policy --> score([Target score + reasons])
-    policy -.->|0.2 to 0.7, LLM on| llm[LLM decides]
-    llm -.-> score
-```
+<img src="docs/images/link-logic.png" alt="A link's text, URL, heading and nearby text become 22 signals; learned weights give a probability; year and draft discounts follow; the LLM decides only scores between 0.2 and 0.7" width="100%">
 
 A real result from Ann Arbor, with the reasons the API returns:
 
