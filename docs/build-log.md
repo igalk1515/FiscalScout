@@ -364,7 +364,7 @@ All 19 crawls were still there afterwards.
 ## Learned weights (Nov 9–10)
 
 The hand-set weights were the weakest part of the ranking: guesses, checked on four sites. This
-step fits them on labeled links. The README section "Learned weights" has the method and the
+step fits them on labeled links. The section "Learned weights" in `docs/how-it-works.md` has the method and the
 final numbers; this is what happened on the way.
 
 **Data.** 18 more public bodies (`eval/learn/sites.txt`) crawled with the LLM off, plus the
