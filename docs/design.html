@@ -353,7 +353,7 @@ h3[id] { scroll-margin-top: 24px; }
       </div>
 
       <h3>Bozeman · bozeman.net → bozemanmt.gov</h3>
-      <p class="path">This site refused the crawler's own User-Agent, so these rows come from search results and need to be confirmed in a browser. Since November 8 the crawler sends a browser User-Agent by default, which the site accepted in direct page fetches; the evaluation results predate that change. The hub is <a href="https://www.bozemanmt.gov/departments/finance/budget-and-financial-reports">Budget and Financial Reports</a>.</p>
+      <p class="path">This site refused the crawler's own User-Agent, so these rows come from search results and need to be confirmed in a browser. Since November 8 the crawler sends a browser User-Agent by default, which the site accepts. On November 10 these rows were confirmed from the crawler's saved copy of the hub page and the staff directory, and Bozeman joined the evaluation. The hub is <a href="https://www.bozemanmt.gov/departments/finance/budget-and-financial-reports">Budget and Financial Reports</a>.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Target</th><th>Link text on the site</th><th>Where the file lives</th></tr></thead>
@@ -838,7 +838,7 @@ returning f.url, f.host;
         <li><strong>Data:</strong> 22 public bodies, the four test sites and 18 others: cities, counties, school districts and universities. That gives 5,402 links with a keyword signal.</li>
         <li><strong>Labels:</strong> <code>gpt-4.1-mini</code> labeled every link against a strict definition of a target: the document itself, not its list page, a presentation or another government's report. All the labels cost $0.43. A hand check agreed on 58 of 60.</li>
         <li><strong>Training:</strong> Newton's method in about 100 lines, with no dependency. Every site counts the same, so one county's 476 department budget requests cannot set the weights for everyone.</li>
-        <li><strong>Result, leave one site out:</strong> AUC 0.833 against 0.762 for the hand-set weights. Labeled targets among each site's ten best documents: 132 of 170 against 118. On the test sites, a model that never saw them finds 9 of 9 must-find targets and gets ASU to 10 of 10 without the LLM.</li>
+        <li><strong>Result, leave one site out:</strong> AUC 0.833 against 0.762 for the hand-set weights. Labeled targets among each site's ten best documents: 132 of 170 against 118. On the test sites, a model that never saw them finds 11 of 12 must-find targets, as the other rankers do, and gets ASU to 10 of 10 without the LLM.</li>
       </ul>
 
       <h3 id="keywords">Configurable keywords</h3>
@@ -1154,8 +1154,8 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
       <h2 id="h-eval">Evaluation</h2>
       <p>Ranking quality is measured, not eyeballed.</p>
       <ul class="list">
-        <li><strong>Must-find list</strong> (<code>eval/must-find.json</code>, written by hand before the crawler ran): for each site, the latest budget, the latest ACFR and the finance contact with the right title and email. A target counts as found when it is in the top 10 of its type. Recall on this list is the headline number: 9 of 9, with the LLM and with rules alone.</li>
-        <li><strong>Precision@10 for documents:</strong> how many of the ten best name a finance document in the link text, the URL or the heading above the link, and belong to the entity. A host listed as someone else's, such as the State of Arizona's budget office, never counts. With the LLM it is 10 of 10 at all three reachable sites; with rules alone, 7 of 10 at ASU.</li>
+        <li><strong>Must-find list</strong> (<code>eval/must-find.json</code>, written by hand before the crawler ran): for each site, the latest budget, the latest ACFR and the finance contact with the right title and email. A target counts as found when it is in the top 10 of its type. Recall on this list is the headline number: 11 of 12 across the four sites, with the LLM, with rules alone and with the learned ranker. The miss is Bozeman's finance director: the staff directory lists her last name first in a table, which the contact extractor does not read.</li>
+        <li><strong>Precision@10 for documents:</strong> how many of the ten best name a finance document in the link text, the URL or the heading above the link, and belong to the entity. A host listed as someone else's, such as the State of Arizona's budget office, never counts. With the LLM it is 10 of 10 at Ann Arbor, Boerne and ASU, and 9 of 10 at Bozeman. With rules alone, ASU drops to 7 of 10. The learned ranker matches the LLM without calling it.</li>
         <li><strong>Cost per tier:</strong> how many links the LLM decided, and what the run cost.</li>
         <li><strong>The same crawls, ranked twice:</strong> once with the LLM and once with rules alone, from the saved pages. Results are in <code>eval/results.md</code> and <code>eval/results-rules-only.md</code>.</li>
         <li><strong>A labeled set across 22 sites:</strong> 5,402 links labeled by an LLM and spot-checked by hand, scored leave-one-site-out. The learned weights beat the hand-set ones on 9 sites, lose on 2 and tie on 7. Details are in <code>eval/results-learned.md</code>.</li>

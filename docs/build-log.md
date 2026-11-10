@@ -400,6 +400,38 @@ summaries first. The shipped model is then fitted on all 22 sites.
 **Tests:** 173 pass. New tests cover the regression solver, the features, the ranker switch
 through the API, and two sanity checks on the trained weights.
 
+**Re-ranking on the demo server ran out of memory.** It held every saved page of a crawl in
+memory at once; a 500-page Bozeman crawl was too much for a 450 MB service. It now reads pages
+one at a time, after a quick pass over each page's head for mirror hosts. The dataset built
+with the new reader is byte for byte the same.
+
+## Bozeman joins the evaluation (Nov 10)
+
+Bozeman had been in the must-find list only as "expect blocked". Since the request identity
+change the crawler gets in, so it now has targets of its own. bozemanmt.gov answers 403 to curl
+and to a headless browser, so the targets were read by hand from the crawler's saved copy of the
+finance hub and the staff directory:
+- the FY2025 annual financial report;
+- the 2027 biennium adopted budget, the FY2027 recommended budget or the FY2026 adopted budget.
+  The adopted biennium budget appeared on the hub between two crawls;
+- the finance director, Melissa Hodnett.
+
+A fresh crawl with the default settings (295 pages, LLM on, $0.0005), ranked three ways:
+
+| | Rules only | With LLM | Learned |
+|---|---|---|---|
+| Must-find | 2/3 | 2/3 | 2/3 |
+| Precision@10 | 9/10 | 9/10 | 9/10 |
+
+Across the four sites, must-find is now 11 of 12 for every ranker.
+
+**The miss is the finance director, for every ranker.** The directory is a table with "Hodnett,
+Melissa", last name first, and no email. The contact extractor does not read that layout.
+
+**A weakness of the learned ranker showed here.** It puts the FY2027 recommended budget third,
+behind the capital improvement plan and the FY2024 budget. It reads "Recommended" and "Biennium"
+as extra words in the link text, the same feature that pushes down "Budget Impact Analysis".
+
 ## Not done
 
 - **GitHub:** creating the public repository was refused by the permission system on this

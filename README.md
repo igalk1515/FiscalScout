@@ -29,12 +29,14 @@ every crawl.
 ## Results on the test sites
 
 **How it was measured:**
-- **One final run on the final code, with the default settings.** Each site was crawled once
-  from its home page: depth 3, a page budget of 300, the LLM on (`gpt-4o-mini`) and browser
-  rendering off.
-- **The same crawls, ranked twice:** once with the LLM and once with rules alone.
+- **One run per site, with the default settings.** Each site was crawled once from its home
+  page: depth 3, a page budget of 300, the LLM on (`gpt-4o-mini`) and browser rendering off.
+  Bozeman was crawled on November 10, after the request identity change let the crawler in.
+- **The same crawls, ranked three ways:** with the LLM, with rules alone, and with the learned
+  ranker.
 - **A hand-made must-find list.** [eval/must-find.json](eval/must-find.json) was built before the
-  crawler ran. A target counts as found when it is in the top 10 of its type.
+  crawler ran. Bozeman's targets were added on November 10, read by hand from its finance hub
+  page and staff directory. A target counts as found when it is in the top 10 of its type.
 - **Precision@10:** how many of the ten best documents name a finance document (in the link
   text, the URL or the heading above the link) and belong to the entity.
 
@@ -45,14 +47,16 @@ Run it yourself with `npm run eval -- --run`.
 | Ann Arbor (a2gov.org) | 294 pages | 3/3 | 3/3 | 3/3 | 10/10 | 10/10 | 10/10 |
 | Boerne ISD (boerneisd.net) | 288 pages | 3/3 | 3/3 | 3/3 | 10/10 | 10/10 | 10/10 |
 | Arizona State University (asu.edu) | 292 pages | 3/3 | 3/3 | 3/3 | 7/10 | 10/10 | 10/10 |
-| Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - | - | - | - |
+| Bozeman (bozeman.net) | 295 pages | 2/3 | 2/3 | 2/3 | 9/10 | 9/10 | 9/10 |
 
 **Learned** is the learned ranker with the LLM off, fitted only on the 18 other sites, so it
 never saw these four (see [Learned weights](#learned-weights-the-default-ranker)).
 
-These results predate the request identity changes described below. Bozeman rejected the old
-custom crawler User-Agent but accepted both the Chrome header now used by default and Node's
-standard HTTP client in direct page-fetch tests.
+**Bozeman's miss is the finance director.** Its staff directory is a table that lists
+"Hodnett, Melissa", last name first, with no email. The contact extractor does not read that
+layout. The annual financial report and the budget are found by all three rankers. The learned
+ranker puts the FY2027 recommended budget third, behind the capital improvement plan and the
+FY2024 budget: it reads "Recommended" and "Biennium" as extra words in the link text.
 
 **Why ASU is 7/10 with rules alone.** ASU's finance site also links the State of Arizona's
 budget summaries. A document on another government's site gets × 0.75, so with the LLM, ASU's
@@ -70,7 +74,7 @@ What it found, first in each list:
 | Ann Arbor | FY2025 ACFR (govstack CDN) | FY2026 adopted budget book; FY2027 on ClearGov | Marti Praschan, Chief Financial Officer, mpraschan@a2gov.org |
 | Boerne ISD | FY2025 Annual Financial Report (file host) | 2026-27 adopted budget, PDF and Excel | Wesley Scott, Chief Financial Officer, wesley.scott@boerneisd.net |
 | ASU | 2026 annual comprehensive financial report | FY2027 operating budget (Board of Regents SharePoint) | Morgan R. Olsen, Executive Vice President, Treasurer and CFO |
-| Bozeman | the original run received 403 with the custom crawler User-Agent | | |
+| Bozeman | FY2025 Annual Financial Report (bozemanmt.gov) | FY2027 recommended operating budget | not found: see above |
 
 Two details worth knowing: ASU's finance site is reached without a browser through a footer link
 called "Jobs" (the host name `cfo.asu.edu` carries the signal), and ASU's CFO is read from JSON
@@ -85,8 +89,9 @@ CFO. Each one has an email checked against the page:
 
 ASU's crawl returns 48 people from its finance offices.
 
-**LLM cost:** the first LLM run over all three sites cost **$0.025** with `gpt-4o-mini`. The
-final run cost $0.002, because answers seen before come from the cache.
+**LLM cost:** the first LLM run over the first three sites cost **$0.025** with `gpt-4o-mini`.
+The final run cost $0.002, because answers seen before come from the cache. Bozeman's crawl
+cost $0.0005.
 
 **Full details:** [eval/results.md](eval/results.md) (with the LLM),
 [eval/results-rules-only.md](eval/results-rules-only.md),
@@ -294,8 +299,8 @@ everyone.
 | Labeled targets among each site's 10 best documents, summed | 118/170 | 132/170 |
 | Sites where the top 10 is better / worse / the same | | 9 / 2 / 7 (4 sites have no documents to rank) |
 
-On the test sites, a model fitted without them, with the LLM off, finds 9 of 9 must-find
-targets and lifts ASU's precision@10 from 7 to 10 (table above).
+On the test sites, a model fitted without them, with the LLM off, finds 11 of 12 must-find
+targets, like the other rankers, and lifts ASU's precision@10 from 7 to 10 (table above).
 
 **What it learned** (log-odds; full table in [eval/results-learned.md](eval/results-learned.md)):
 - **Against a target:** a paper about the document (−3.9), a file matched by a contact title
@@ -630,6 +635,8 @@ in [eval/must-find.json](eval/must-find.json) and writes [eval/results.md](eval/
 - **Pages drawn entirely by scripts** are read only with the render tier on, and only on the
   entity's own site. The ClearGov budget viewer sits on ClearGov's host, so it stays a ranked
   link flagged `needs_browser`. Links that scripts open on click (no `href`) are not followed.
+- **Contacts in directory tables** with names written last name first ("Hodnett, Melissa") are
+  missed. This is Bozeman's finance director.
 - **Scanned PDFs** are not read. Documents are ranked by their link, not their content, so
   search covers link text and URLs, not the text inside a document.
 

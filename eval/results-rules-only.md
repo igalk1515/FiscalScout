@@ -1,13 +1,13 @@
-# Evaluation · 2026-11-09 03:08 UTC
+# Evaluation · 2026-11-10 08:41 UTC
 
 | Site | Crawl | Must-find | Precision@10 (documents) | Links decided by the LLM |
 |---|---|---|---|---|
 | Ann Arbor | done, 294 pages (`a65c5cee`) | 3/3 | 10/10 | 0 of 347 |
 | Boerne ISD | done, 288 pages (`c05c81cc`) | 3/3 | 10/10 | 0 of 25 |
 | Arizona State University | done, 292 pages (`2add4e1c`) | 3/3 | 7/10 | 0 of 45 |
-| Bozeman | blocked, 0 pages (`ac021cd9`) | blocked and reported, as expected | - | - |
+| Bozeman | done, 295 pages (`9d1761d3`) | 2/3 | 9/10 | 0 of 29 |
 
-**Must-find recall: 9/9**
+**Must-find recall: 11/12**
 
 Precision@10 counts how many of the ten best-scored documents name a finance document (ACFR, budget, audit, financial report) in their link text, URL or the heading they sit under, and belong to the entity: documents on hosts listed as someone else's (the State of Arizona's budget office for ASU) never count. It is a quick check, not a full labeled set.
 
@@ -52,4 +52,13 @@ Top 5 documents:
 
 ## Bozeman
 
-- the site refused automated requests (HTTP 403); not bypassed
+- found: Annual financial report FY2025 (rank 1 of 12 acfr documents, score 0.92)
+- found: 2027 biennium adopted budget, FY2027 recommended budget or FY2026 adopted budget (rank 1 of 15 budget documents, score 1.00)
+- MISSED: Finance Director (the directory lists no email) (not found)
+
+Top 5 documents:
+- 1.00 budget 2027 FY27 Recommended Annual Operating Budget <https://www.bozemanmt.gov/home/showpublisheddocument/16195/639167915034300000>
+- 1.00 budget 2027 2027 Biennium Recommended Budget <https://www.bozemanmt.gov/home/showpublisheddocument/16172/639168611916930000>
+- 1.00 budget 2027 2027 Biennium Adopted Budget <https://www.bozemanmt.gov/home/showpublisheddocument/16509/639298161099370000>
+- 1.00 budget 2026 FY26 Adopted Annual Operating Budget <https://www.bozemanmt.gov/home/showpublisheddocument/15175/638857696623000000>
+- 0.95 budget 2027 FY27-31 Adopted Capital Improvement Plan <https://www.bozemanmt.gov/home/showpublisheddocument/15946/639100261647530000>
