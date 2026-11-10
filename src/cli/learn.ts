@@ -79,9 +79,9 @@ async function buildDataset(ctx: AppContext) {
   const out: Sample[] = [];
   const seen = new Map<string, number>();
   for (const crawl of crawls.rows) {
-    const { pages, fileTypes, scope } = await readSavedPages(ctx, crawl);
+    const { each, total, fileTypes, scope } = await readSavedPages(ctx, crawl);
     let n = 0;
-    for (const { p, page } of pages) {
+    for await (const { p, page } of each()) {
       for (const link of page.links) {
         const internal = inScope(link.url, scope);
         const ctxS = { groups, parentPathScore: p.path_score, internal, contentTypeFileType: fileTypes.get(link.url) ?? null, now: NOW };
@@ -115,7 +115,7 @@ async function buildDataset(ctx: AppContext) {
         }
       }
     }
-    console.log(`${crawl.scope_domain.padEnd(24)} ${String(pages.length).padStart(4)} pages  ${String(n).padStart(5)} links`);
+    console.log(`${crawl.scope_domain.padEnd(24)} ${String(total).padStart(4)} pages  ${String(n).padStart(5)} links`);
   }
   await mkdir(DIR, { recursive: true });
   await writeFile(LINKS, out.map((s) => JSON.stringify(s)).join("\n") + "\n");

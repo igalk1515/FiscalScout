@@ -20,6 +20,10 @@ export interface SavedPage {
  * The pages a finished crawl ranked, read back from the raw files on disk, with their links
  * as the crawl saw them (mirror hosts mapped back to the original host). Shared by re-ranking
  * and by the learned ranker's dataset builder.
+ *
+ * Pages are read one at a time, so memory stays flat on a crawl of thousands of pages. Mirror
+ * hosts come first, from a quick pass over each page's head, because every page's links need
+ * the full list.
  */
 export async function readSavedPages(ctx: AppContext, crawl: repo.CrawlRow) {
   const crawlId = crawl.id;
@@ -42,41 +46,50 @@ export async function readSavedPages(ctx: AppContext, crawl: repo.CrawlRow) {
   );
   const fileTypes = new Map(learned.rows.map((r) => [r.url, r.file_type!]));
 
-  let missing = 0;
-  const read: SavedPage[] = [];
+  // Mirror hosts, learned from canonical links as during the crawl: their links count under the
+  // original host. Only the head of each page is parsed for this.
+  const mirrors = new Map<string, string>();
   for (const p of pages.rows) {
     let html: string;
     try {
       html = await readRaw(ctx.config.RAW_DIR, p.raw_path);
     } catch {
-      missing++;
       continue;
     }
+    const headEnd = html.search(/<\/head\s*>/i);
+    const head = headEnd > 0 ? html.slice(0, headEnd) : html.slice(0, 65536);
     const pageUrl = p.final_url ?? p.url;
-    const $ = parseHtml(html);
-    read.push({ p, pageUrl, $, page: extractPage($, pageUrl) });
-  }
-  // Mirror hosts, learned from canonical links as during the crawl: their links count under the
-  // original host.
-  const mirrors = new Map<string, string>();
-  for (const { pageUrl, page } of read) {
-    const m = mirrorOf(pageUrl, page.canonical, scope);
+    const m = mirrorOf(pageUrl, extractPage(head, pageUrl).canonical, scope);
     if (m && !mirrors.has(m.host)) mirrors.set(m.host, m.origin);
   }
 
-  for (const r of read) {
-    if (mirrorOf(r.pageUrl, r.page.canonical, scope)) r.pageUrl = r.page.canonical!;
-    if (mirrors.size) {
-      const byUrl = new Map<string, LinkCandidate>();
-      for (const l of r.page.links) {
-        const url = unmirror(l.url, mirrors);
-        const prev = byUrl.get(url);
-        if (!prev || (prev.boilerplate && !l.boilerplate)) byUrl.set(url, { ...l, url });
+  const counts = { missing: 0 };
+  async function* each(): AsyncGenerator<SavedPage> {
+    for (const p of pages.rows) {
+      let html: string;
+      try {
+        html = await readRaw(ctx.config.RAW_DIR, p.raw_path);
+      } catch {
+        counts.missing++;
+        continue;
       }
-      r.page.links = [...byUrl.values()];
+      let pageUrl = p.final_url ?? p.url;
+      const $ = parseHtml(html);
+      const page = extractPage($, pageUrl);
+      if (mirrorOf(pageUrl, page.canonical, scope)) pageUrl = page.canonical!;
+      if (mirrors.size) {
+        const byUrl = new Map<string, LinkCandidate>();
+        for (const l of page.links) {
+          const url = unmirror(l.url, mirrors);
+          const prev = byUrl.get(url);
+          if (!prev || (prev.boilerplate && !l.boilerplate)) byUrl.set(url, { ...l, url });
+        }
+        page.links = [...byUrl.values()];
+      }
+      yield { p, pageUrl, $, page };
     }
   }
-  return { pages: read, total: pages.rows.length, missing, mirrors, fileTypes, scope };
+  return { each, total: pages.rows.length, counts, mirrors, fileTypes, scope };
 }
 
 /**
@@ -96,7 +109,7 @@ export async function rescoreCrawl(
   if (!crawl) throw new Error(`crawl ${crawlId} not found`);
   const groups = compileKeywords(keywords ?? crawl.keywords);
   const version = opts.ranker ? rankerVersion(opts.ranker) : crawl.ranker_version;
-  const { pages: read, total, missing, mirrors, fileTypes, scope } = await readSavedPages(ctx, crawl);
+  const { each, total, counts, mirrors, fileTypes, scope } = await readSavedPages(ctx, crawl);
   await ctx.db.query("delete from link_scores where crawl_id = $1", [crawlId]);
   await ctx.db.query("delete from sightings where crawl_id = $1", [crawlId]);
   await ctx.db.query("delete from contacts where crawl_id = $1", [crawlId]);
@@ -104,7 +117,7 @@ export async function rescoreCrawl(
 
   let links = 0;
   let contacts = 0;
-  for (const { p, pageUrl, $, page } of read) {
+  for await (const { p, pageUrl, $, page } of each()) {
     const all = page.links.map((link) => ({
       link,
       s: rankLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope), contentTypeFileType: fileTypes.get(link.url) }, version),
@@ -161,5 +174,5 @@ export async function rescoreCrawl(
       contacts += fresh.length;
     }
   }
-  return { pages: total, links, contacts, missing, mirrors: [...mirrors.keys()], ranker: rankerName(version) };
+  return { pages: total, links, contacts, missing: counts.missing, mirrors: [...mirrors.keys()], ranker: rankerName(version) };
 }
