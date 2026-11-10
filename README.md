@@ -72,7 +72,39 @@ Adopted Budget FY2026   (PDF, under "Annual Budgets")              target score 
   runs without a key.
 - **Contacts are results too:** name, title, email and phone, each checked against the page text.
 
-[Ranking in depth →](docs/how-it-works.md#how-links-are-prioritized)
+### How the weights were learned
+
+The first weights were set by hand: guesses, checked on four sites. These are fitted on labeled
+links instead.
+
+| 1 · Collect | 2 · Label | 3 · Train | 4 · Test |
+|---|---|---|---|
+| 22 public bodies crawled: cities, counties, school districts and universities. **5,402 links** that carry a keyword. | `gpt-4.1-mini` marks each link: the document itself, or not. **$0.43** for all of them, and 58 of 60 right in a hand check. | Logistic regression over the 22 signals, solved with Newton's method in about 100 lines. Every site counts the same. | Each site is scored by a model that never saw it, and compared with the hand-set weights. |
+
+| Each site held out | Hand-set weights | Learned weights |
+|---|:---:|:---:|
+| AUC over all labeled links | 0.762 | **0.833** |
+| Labeled targets in each site's top 10 | 118 / 170 | **132 / 170** |
+| Sites better · worse · the same | | 9 · 2 · 7 |
+
+<details>
+<summary><b>What the model learned</b></summary>
+<br>
+
+| Pushes a link up | | Pushes a link down | |
+|---|:---:|---|:---:|
+| The link text is only a year, under a heading that names the document | +4.4 | A paper about the document: answers, a presentation, a notice | −3.9 |
+| A full official name in the link text | +3.0 | A file matched by a contact title | −2.5 |
+| A fiscal year is named | +2.4 | Another government's site | −2.3 |
+| The keyword is in the link text | +1.8 | A page on the entity's site named for a document: usually the list | −2.3 |
+| The link text is just the name and the year | +1.1 | Other words in the link text besides the name and year | −1.6 |
+
+One surprise: a keyword only in the URL counts slightly against (−0.6). Language switchers and
+menu pages carry "budget" in their URLs too.
+
+</details>
+
+[The method, the data and every weight →](docs/how-it-works.md#learned-weights-the-default-ranker)
 
 ## Results
 
@@ -86,10 +118,8 @@ ways: hand-set rules, rules with an LLM, and the learned weights.
 | Arizona State | 3 / 3 | **7** · 10 · **10** |
 | Bozeman | 2 / 3 | 9 · 9 · 9 |
 
-The learned weights match the LLM without calling it. Across 22 sites, each scored by a model
-that never saw it:
-
-> **AUC 0.83** against 0.76 for the hand-set weights · **132 of 170** labeled targets in the top 10, against 118
+The learned weights match the LLM without calling it: at ASU they lift the top 10 from 7 to 10,
+with a model that never saw the test sites.
 
 Bozeman's miss is its finance director, listed last name first in a directory table.
 [All the results →](docs/how-it-works.md#results-on-the-test-sites)
