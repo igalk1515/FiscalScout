@@ -1,13 +1,13 @@
-# Evaluation · 2026-11-10 08:40 UTC
+# Evaluation · 2026-11-10 19:43 UTC
 
 | Site | Crawl | Must-find | Precision@10 (documents) | Links decided by the LLM |
 |---|---|---|---|---|
 | Ann Arbor | done, 294 pages (`a65c5cee`) | 3/3 | 10/10 | 225 of 318 |
 | Boerne ISD | done, 288 pages (`c05c81cc`) | 3/3 | 10/10 | 6 of 23 |
 | Arizona State University | done, 292 pages (`2add4e1c`) | 3/3 | 10/10 | 23 of 31 |
-| Bozeman | done, 295 pages (`9d1761d3`) | 2/3 | 9/10 | 16 of 28 |
+| Bozeman | done, 295 pages (`9d1761d3`) | 3/3 | 9/10 | 16 of 28 |
 
-**Must-find recall: 11/12**
+**Must-find recall: 12/12**
 
 Precision@10 counts how many of the ten best-scored documents name a finance document (ACFR, budget, audit, financial report) in their link text, URL or the heading they sit under, and belong to the entity: documents on hosts listed as someone else's (the State of Arizona's budget office for ASU) never count. It is a quick check, not a full labeled set.
 
@@ -54,7 +54,7 @@ Top 5 documents:
 
 - found: Annual financial report FY2025 (rank 1 of 12 acfr documents, score 0.92)
 - found: 2027 biennium adopted budget, FY2027 recommended budget or FY2026 adopted budget (rank 1 of 15 budget documents, score 1.00)
-- MISSED: Finance Director (the directory lists no email) (not found)
+- found: Finance Director (the directory lists no email) (Melissa Hodnett · Finance Director · no email · score 0.58)
 
 Top 5 documents:
 - 1.00 budget 2027 FY27 Recommended Annual Operating Budget <https://www.bozemanmt.gov/home/showpublisheddocument/16195/639167915034300000>

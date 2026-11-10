@@ -51,13 +51,32 @@ const SHARED_LOCAL =
   /^(info|contact|contactus|webmaster|web|admin|office|help|helpdesk|support|hr|humanresources|payroll|purchasing|procurement|finance|accounting|accountspayable|ap|budget|business|businessoffice|questions|communications|media|press|records|openrecords|mail|general|customerservice|customer\.service|no-?reply)$/i;
 const isShared = (email: string) => SHARED_LOCAL.test(email.split("@")[0] ?? "");
 
+const SUFFIX_OR_CREDENTIAL = /^(phd|ph\.d\.|md|jd|mba|mpa|cpa|cgfo|cpfo|esq|jr|sr|ii|iii|iv)\.?$/i;
+
+/**
+ * A staff directory writes the last name first: "Hodnett, Melissa" or "Pettigrew, Michael J.".
+ * Returns the name in reading order, or null when the part after the comma is not a first name
+ * (a credential such as "CPA" or "PhD", or a suffix such as "Jr.").
+ */
+function lastNameFirst(parts: string[]): string | null {
+  if (parts.length !== 2) return null;
+  const [last, first] = parts as [string, string];
+  if (!/^[A-Z][a-zA-Z'’-]+$/.test(last)) return null; // one word
+  const given = first.split(/\s+/).filter(Boolean);
+  if (given.length < 1 || given.length > 2) return null;
+  if (!/^[A-Z][a-z][a-zA-Z'’-]*$/.test(given[0]!) || SUFFIX_OR_CREDENTIAL.test(given[0]!)) return null;
+  if (given[1] && !/^([A-Z]\.|[A-Z][a-z][a-zA-Z'’-]*)$/.test(given[1])) return null;
+  return `${given.join(" ")} ${last}`;
+}
+
 /** A person's name: two to four capitalized words, initials allowed, after honorifics and credentials are removed. */
 export function cleanName(raw: string): string | null {
   let s = cleanText(raw).replace(/[,;:\-|]+$/, "").trim();
   s = s.replace(HONORIFIC, "");
-  // Credentials after a comma: "Wesley Scott, CPA, RTSBA" -> "Wesley Scott"
+  // Credentials after a comma: "Wesley Scott, CPA, RTSBA" -> "Wesley Scott". A directory's
+  // "Hodnett, Melissa" -> "Melissa Hodnett".
   const parts = s.split(",").map((p) => p.trim());
-  s = parts[0]!;
+  s = lastNameFirst(parts) ?? parts[0]!;
   const tokens = s.split(/\s+/).filter(Boolean);
   if (tokens.length < 2 || tokens.length > 4) return null;
   for (const t of tokens) {
@@ -171,7 +190,11 @@ const digits = (s: string) => s.replace(/\D/g, "");
 export function verifyAgainstBlock(c: LlmContact, block: string): LlmContact | null {
   const text = norm(block);
   const name = c.name ? cleanName(c.name) : null;
-  if (!name || !text.includes(name.toLowerCase())) return null;
+  if (!name) return null;
+  // The page may write the name last name first, as a staff directory does: "Hodnett, Melissa".
+  const words = name.split(" ");
+  const lastFirst = `${words[words.length - 1]}, ${words.slice(0, -1).join(" ")}`.toLowerCase();
+  if (!text.includes(name.toLowerCase()) && !text.includes(lastFirst)) return null;
   const titleOk = c.title && c.title.split(/\W+/).filter((w) => w.length >= 3).every((w) => text.includes(w.toLowerCase()));
   // A real address only: "[email protected]" is what a page shows in place of an email it hides
   // from bots, and hidden emails stay hidden.
@@ -212,6 +235,8 @@ function candidateBlocks($: CheerioAPI, groups: CompiledGroup[]): string[] {
       if (len > MAX_BLOCK) break;
       if (personalMailtos($, cur) > 1 && cur !== seed) break;
       best = cur;
+      // A table row is one record: in a staff directory, one person with their own phone.
+      if (cur.name === "tr") break;
       cur = cur.parent as Element | null;
     }
     let text = blockText(best);

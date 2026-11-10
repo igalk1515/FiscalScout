@@ -26,14 +26,16 @@ Run it yourself with `npm run eval -- --run`.
 | Ann Arbor (a2gov.org) | 294 pages | 3/3 | 3/3 | 3/3 | 10/10 | 10/10 | 10/10 |
 | Boerne ISD (boerneisd.net) | 288 pages | 3/3 | 3/3 | 3/3 | 10/10 | 10/10 | 10/10 |
 | Arizona State University (asu.edu) | 292 pages | 3/3 | 3/3 | 3/3 | 7/10 | 10/10 | 10/10 |
-| Bozeman (bozeman.net) | 295 pages | 2/3 | 2/3 | 2/3 | 9/10 | 9/10 | 9/10 |
+| Bozeman (bozeman.net) | 295 pages | 3/3 | 3/3 | 3/3 | 9/10 | 9/10 | 9/10 |
 
 **Learned** is the learned ranker with the LLM off, fitted only on the 18 other sites, so it
 never saw these four (see [Learned weights](#learned-weights-the-default-ranker)).
 
-**Bozeman's miss is the finance director.** Its staff directory is a table that lists
-"Hodnett, Melissa", last name first, with no email. The contact extractor does not read that
-layout. The annual financial report and the budget are found by all three rankers. The learned
+**Bozeman's finance director** sits in a staff directory: a table that lists "Hodnett,
+Melissa", last name first, with no email. The first runs missed her. The contact extractor now
+reads a name written last name first, and treats each table row as one person, so the phone on
+the row is hers. She comes first, followed by the treasurer, the controller and the budget
+manager, each with a phone. The learned
 ranker puts the FY2027 recommended budget third, behind the capital improvement plan and the
 FY2024 budget: it reads "Recommended" and "Biennium" as extra words in the link text.
 
@@ -53,7 +55,7 @@ What it found, first in each list:
 | Ann Arbor | FY2025 ACFR (govstack CDN) | FY2026 adopted budget book; FY2027 on ClearGov | Marti Praschan, Chief Financial Officer, mpraschan@a2gov.org |
 | Boerne ISD | FY2025 Annual Financial Report (file host) | 2026-27 adopted budget, PDF and Excel | Wesley Scott, Chief Financial Officer, wesley.scott@boerneisd.net |
 | ASU | 2026 annual comprehensive financial report | FY2027 operating budget (Board of Regents SharePoint) | Morgan R. Olsen, Executive Vice President, Treasurer and CFO |
-| Bozeman | FY2025 Annual Financial Report (bozemanmt.gov) | FY2027 recommended operating budget | not found: see above |
+| Bozeman | FY2025 Annual Financial Report (bozemanmt.gov) | FY2027 recommended operating budget | Melissa Hodnett, Finance Director, (406) 582-2318 (the directory lists no email) |
 
 Two details worth knowing: ASU's finance site is reached without a browser through a footer link
 called "Jobs" (the host name `cfo.asu.edu` carries the signal), and ASU's CFO is read from JSON
@@ -201,7 +203,7 @@ everyone.
 | Labeled targets among each site's 10 best documents, summed | 118/170 | 132/170 |
 | Sites where the top 10 is better / worse / the same | | 9 / 2 / 7 (4 sites have no documents to rank) |
 
-On the test sites, a model fitted without them, with the LLM off, finds 11 of 12 must-find
+On the test sites, a model fitted without them, with the LLM off, finds 12 of 12 must-find
 targets, like the other rankers, and lifts ASU's precision@10 from 7 to 10 (table above).
 
 **What it learned** (log-odds; full table in [eval/results-learned.md](../eval/results-learned.md)):
@@ -402,8 +404,6 @@ in [eval/must-find.json](../eval/must-find.json) and writes [eval/results.md](..
 - **Pages drawn entirely by scripts** are read only with the render tier on, and only on the
   entity's own site. The ClearGov budget viewer sits on ClearGov's host, so it stays a ranked
   link flagged `needs_browser`. Links that scripts open on click (no `href`) are not followed.
-- **Contacts in directory tables** with names written last name first ("Hodnett, Melissa") are
-  missed. This is Bozeman's finance director.
 - **Scanned PDFs** are not read. Documents are ranked by their link, not their content, so
   search covers link text and URLs, not the text inside a document.
 

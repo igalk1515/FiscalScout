@@ -116,12 +116,12 @@ ways: hand-set rules, rules with an LLM, and the learned weights.
 | Ann Arbor | 3 / 3 | 10 · 10 · 10 |
 | Boerne ISD | 3 / 3 | 10 · 10 · 10 |
 | Arizona State | 3 / 3 | **7** · 10 · **10** |
-| Bozeman | 2 / 3 | 9 · 9 · 9 |
+| Bozeman | 3 / 3 | 9 · 9 · 9 |
 
 The learned weights match the LLM without calling it: at ASU they lift the top 10 from 7 to 10,
 with a model that never saw the test sites.
 
-Bozeman's miss is its finance director, listed last name first in a directory table.
+Every must-find target is found on every site, by all three rankers: 12 of 12.
 [All the results →](docs/how-it-works.md#results-on-the-test-sites)
 
 ## Quick start

@@ -428,6 +428,16 @@ Across the four sites, must-find is now 11 of 12 for every ranker.
 **The miss is the finance director, for every ranker.** The directory is a table with "Hodnett,
 Melissa", last name first, and no email. The contact extractor does not read that layout.
 
+**Then fixed: the finance director.** Two changes to the contact extractor:
+- a name written last name first ("Hodnett, Melissa") is read in reading order. A credential or a
+  suffix after the comma ("Scott, CPA", "Scott, Jr.") is still not taken for a first name;
+- a table row is one record. The block around a title stops at its row, so the phone on the row
+  belongs to that person even when the whole table is short.
+
+Bozeman's contacts are now the finance director first, then the treasurer, the controller and
+the budget manager, each with a phone. Must-find is 3/3 for Bozeman and 12 of 12 across the four
+sites, for every ranker. The other sites' results did not change.
+
 **A weakness of the learned ranker showed here.** It puts the FY2027 recommended budget third,
 behind the capital improvement plan and the FY2024 budget. It reads "Recommended" and "Biennium"
 as extra words in the link text, the same feature that pushes down "Budget Impact Analysis".

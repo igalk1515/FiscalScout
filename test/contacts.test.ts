@@ -114,6 +114,40 @@ describe("names and verification", () => {
     expect(cleanName("Learning Enterprise")).toBeNull();
   });
 
+  it("reads a directory's last-name-first names, but not a credential or suffix after the comma", () => {
+    expect(cleanName("Hodnett, Melissa")).toBe("Melissa Hodnett");
+    expect(cleanName("Pettigrew, Michael J.")).toBe("Michael J. Pettigrew");
+    expect(cleanName("Scott, CPA")).toBeNull();
+    expect(cleanName("Smith, PhD")).toBeNull();
+    expect(cleanName("Scott, Jr.")).toBeNull();
+    expect(cleanName("Finance, Director")).toBeNull();
+  });
+
+  it("finds the finance director in a staff directory table (Bozeman's layout)", async () => {
+    const row = (name: string, title: string, phone: string) =>
+      `<tr><td><a href="/staff/1">${name}</a></td><td>${title}</td><td>Finance</td><td><a href="tel:${phone.replace(/\D/g, "")}">${phone}</a></td></tr>`;
+    const $ = parseHtml(
+      `<html><body><table><thead><tr><th>Staff</th><th>Title</th><th>Departments</th><th>Phone</th></tr></thead><tbody>${[
+        row("Funk, Aaron", "Controller", "(406) 582-2335"),
+        row("Hodnett, Melissa", "Finance Director", "(406) 582-2318"),
+        row("Johnson, Kaitlin", "Budget Manager", "(406) 582-2974"),
+        row("Grabinski, Jamie", "Grants Coordinator", "(406) 582-2364"),
+      ].join("")}</tbody></table></body></html>`,
+    );
+    const xs = await findContacts($, [], { groups, entityDomain: "bozemanmt.gov", pagePathScore: 0.9 });
+    expect(xs[0]).toMatchObject({ name: "Melissa Hodnett", title: "Finance Director", phone: "(406) 582-2318", email: null });
+    expect(xs.map((c) => c.name)).toEqual(expect.arrayContaining(["Aaron Funk", "Kaitlin Johnson"]));
+    expect(xs.some((c) => c.name.includes(","))).toBe(false);
+  });
+
+  it("accepts a name the LLM returns in reading order when the page writes it last name first", () => {
+    const block = "Hodnett, Melissa\nFinance Director\nFinance\n(406) 582-2318";
+    expect(verifyAgainstBlock({ name: "Melissa Hodnett", title: "Finance Director", email: null, phone: "(406) 582-2318" }, block)).toMatchObject({
+      name: "Melissa Hodnett",
+      title: "Finance Director",
+    });
+  });
+
   it("cleans a title taken from a sentence", () => {
     expect(cleanTitle("is the vice president for Financial Services and the deputy treasurer.&nbsp; Maryanne Patterson", "Anjali Halabe")).toBe(
       "vice president for Financial Services and the deputy treasurer",

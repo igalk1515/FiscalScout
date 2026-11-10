@@ -1,4 +1,4 @@
-# Evaluation · learned ranker · 2026-11-10 08:43 UTC
+# Evaluation · learned ranker · 2026-11-10 19:47 UTC
 
 Learned ranker, LLM off, with a model fitted on the 18 training sites only: it never saw these four sites. Compare with `results-rules-only.md` (the same crawls, hand-set rules, LLM off) and `results.md` (hand-set rules with the LLM).
 
@@ -7,9 +7,9 @@ Learned ranker, LLM off, with a model fitted on the 18 training sites only: it n
 | Ann Arbor | done, 294 pages (`a65c5cee`) | 3/3 | 10/10 | 0 of 398 |
 | Boerne ISD | done, 288 pages (`c05c81cc`) | 3/3 | 10/10 | 0 of 33 |
 | Arizona State University | done, 292 pages (`2add4e1c`) | 3/3 | 10/10 | 0 of 86 |
-| Bozeman | done, 295 pages (`9d1761d3`) | 2/3 | 9/10 | 0 of 33 |
+| Bozeman | done, 295 pages (`9d1761d3`) | 3/3 | 9/10 | 0 of 33 |
 
-**Must-find recall: 11/12**
+**Must-find recall: 12/12**
 
 Precision@10 counts how many of the ten best-scored documents name a finance document (ACFR, budget, audit, financial report) in their link text, URL or the heading they sit under, and belong to the entity: documents on hosts listed as someone else's (the State of Arizona's budget office for ASU) never count. It is a quick check, not a full labeled set.
 
@@ -56,7 +56,7 @@ Top 5 documents:
 
 - found: Annual financial report FY2025 (rank 1 of 12 acfr documents, score 0.89)
 - found: 2027 biennium adopted budget, FY2027 recommended budget or FY2026 adopted budget (rank 3 of 15 budget documents, score 0.72)
-- MISSED: Finance Director (the directory lists no email) (not found)
+- found: Finance Director (the directory lists no email) (Melissa Hodnett · Finance Director · no email · score 0.58)
 
 Top 5 documents:
 - 0.89 acfr 2025 FY2025 Annual Financial Report <https://www.bozemanmt.gov/home/showpublisheddocument/15690/639044930111800000>
