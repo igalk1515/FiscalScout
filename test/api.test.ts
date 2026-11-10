@@ -30,7 +30,7 @@ beforeAll(async () => {
     config: { CRAWL_WORKERS: 2, MIN_HOST_DELAY_MS: 30, RAW_DIR: mkdtempSync(join(tmpdir(), "raw-")) },
   });
   app = await buildServer(ctx);
-  const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}/`, max_depth: 3, page_budget: 40 } });
+  const res = await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}/`, max_depth: 3, page_budget: 40, ranker: "rules" } });
   crawlId = res.json().id;
   await ctx.runner.start(crawlId);
 });
@@ -267,7 +267,7 @@ describe("searching results and adjusting keywords", () => {
   });
 
   it("serves the results page and the keyword editor, and nothing else from /assets", async () => {
-    expect((await app.inject({ url: `/results/${crawlId}` })).body).toContain("Keywords and weights");
+    expect((await app.inject({ url: `/results/${crawlId}` })).body).toContain("Keywords, weights and ranking");
     const js = await app.inject({ url: "/assets/keywords.js" });
     expect(js.statusCode).toBe(200);
     expect(js.headers["content-type"]).toMatch(/javascript/);

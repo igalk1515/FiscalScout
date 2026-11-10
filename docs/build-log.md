@@ -361,6 +361,45 @@ mounted, which blocked moving the folder in one step. The fix:
 
 All 19 crawls were still there afterwards.
 
+## Learned weights (Nov 9–10)
+
+The hand-set weights were the weakest part of the ranking: guesses, checked on four sites. This
+step fits them on labeled links. The README section "Learned weights" has the method and the
+final numbers; this is what happened on the way.
+
+**Data.** 18 more public bodies (`eval/learn/sites.txt`) crawled with the LLM off, plus the
+four test sites: 5,402 links with a keyword signal. The first dataset counted the same menu link
+once per page, because its nearest heading changes from page to page: Ann Arbor alone gave 1,653
+links. Deduplicating by URL and link text, preferring a sighting outside a menu, brought it to 408.
+
+**Labels.** `gpt-4o-mini` labeled "FY27 Budget Responses" (answers to council questions) as the
+budget itself. A stricter prompt fixed half of them: the same kind of link still got different
+labels in different batches. `gpt-4.1-mini` labeled all of them consistently, so it labeled the
+whole set: $0.43. A hand check of 60 random labels agreed on 58 (`eval/learn/handcheck.md`).
+
+**First fit: better overall, worse at the top.** AUC rose from 0.88 to 0.93 on the first 12
+sites, but precision@10 fell from 75/99 to 67/99. Ann Arbor's top 10 showed why: "FY2012 Budget
+Impact Analysis" looked the same as "Adopted Budget FY2026" to the model. The keyword is in the
+link text, it is a PDF, and it has a year. Two features fixed it:
+- whether the link text is just the name and year, and how many other words it carries;
+- whether the keyword is only near the link and not in its text or URL.
+
+A bug in the first one hid the gain at first: it removed "budget" before "adopted budget",
+leaving "adopted" as an extra word. With longer terms removed first, precision@10 went to 84/99.
+
+**One site set the weights.** With all 22 sites, the gain shrank to 121/170 against 118/170.
+Dane County has 476 department budget requests, labeled as budgets: a third of all targets, from
+one site. Weighting every site the same in training brought it to 132/170 against 118/170.
+
+**Measured fairly on the test sites.** Leave-one-site-out keeps each site out of its own model.
+For the must-find list, a model was fitted on the 18 training sites only, then used to re-rank
+the test crawls with the LLM off. Result: must-find 9/9, and ASU at 10/10 instead of 7/10.
+ASU's own FY2027 budget and 2026 ACFR now lead, where the rules put the State of Arizona's
+summaries first. The shipped model is then fitted on all 22 sites.
+
+**Tests:** 173 pass. New tests cover the regression solver, the features, the ranker switch
+through the API, and two sanity checks on the trained weights.
+
 ## Not done
 
 - **GitHub:** creating the public repository was refused by the permission system on this

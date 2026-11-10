@@ -4,8 +4,10 @@ Finds the links on a public entity's website that lead to **budgets, annual fina
 (ACFR) and finance contacts**, ranks them, and serves them through an API, with a live view of
 every crawl.
 
-- **Ranks every link** with weighted rules and keywords you set per crawl. An LLM decides only
-  the links the rules are unsure about, and the system runs fine without one.
+- **Ranks every link** with weights learned from 5,402 labeled links on 22 public bodies
+  (logistic regression over the rule signals), and keywords you set per crawl. The hand-set
+  rules stay one switch away. An LLM decides only the links the ranker is unsure about, and the
+  system runs fine without one.
 - **Pulls out contacts and files as results:** a finance contact comes out as name, title, email
   and phone, each checked against the page text. A file comes out with its document type and
   fiscal year.
@@ -38,12 +40,15 @@ every crawl.
 
 Run it yourself with `npm run eval -- --run`.
 
-| Site | Crawl | Must-find, rules only | Must-find, with LLM | Precision@10, rules only | Precision@10, with LLM |
-|---|---|---|---|---|---|
-| Ann Arbor (a2gov.org) | 294 pages | 3/3 | 3/3 | 10/10 | 10/10 |
-| Boerne ISD (boerneisd.net) | 288 pages | 3/3 | 3/3 | 10/10 | 10/10 |
-| Arizona State University (asu.edu) | 292 pages | 3/3 | 3/3 | 7/10 | 10/10 |
-| Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - | - |
+| Site | Crawl | Must-find, rules only | Must-find, with LLM | Must-find, learned | Precision@10, rules only | Precision@10, with LLM | Precision@10, learned |
+|---|---|---|---|---|---|---|---|
+| Ann Arbor (a2gov.org) | 294 pages | 3/3 | 3/3 | 3/3 | 10/10 | 10/10 | 10/10 |
+| Boerne ISD (boerneisd.net) | 288 pages | 3/3 | 3/3 | 3/3 | 10/10 | 10/10 | 10/10 |
+| Arizona State University (asu.edu) | 292 pages | 3/3 | 3/3 | 3/3 | 7/10 | 10/10 | 10/10 |
+| Bozeman (bozeman.net) | blocked | reported as blocked | reported as blocked | - | - | - | - |
+
+**Learned** is the learned ranker with the LLM off, fitted only on the 18 other sites, so it
+never saw these four (see [Learned weights](#learned-weights-the-default-ranker)).
 
 These results predate the request identity changes described below. Bozeman rejected the old
 custom crawler User-Agent but accepted both the Chrome header now used by default and Node's
@@ -55,7 +60,8 @@ own reports and budgets fill the top 10, and the state's summaries come 11th and
 rules alone, the state's two summaries still lead at 0.71. ASU's own documents score lower:
 their budgets are labeled only "FY 2027", and its ACFR scores 0.68, which is in the band the
 rules hand to the LLM. The LLM confirms them. This is the cascade doing what it was designed to
-do.
+do. The learned ranker gets to 10/10 without the LLM: ASU's own FY2027 budget and 2026 ACFR come
+first, at 0.99, and the state's summaries drop out of the top 10.
 
 What it found, first in each list:
 
@@ -82,8 +88,10 @@ ASU's crawl returns 48 people from its finance offices.
 **LLM cost:** the first LLM run over all three sites cost **$0.025** with `gpt-4o-mini`. The
 final run cost $0.002, because answers seen before come from the cache.
 
-**Full details:** [eval/results.md](eval/results.md) (with the LLM) and
-[eval/results-rules-only.md](eval/results-rules-only.md).
+**Full details:** [eval/results.md](eval/results.md) (with the LLM),
+[eval/results-rules-only.md](eval/results-rules-only.md),
+[eval/results-learned-test-sites.md](eval/results-learned-test-sites.md) and, for all 22 sites,
+[eval/results-learned.md](eval/results-learned.md).
 
 ---
 
@@ -109,12 +117,14 @@ checked on the real test sites before the next one started:
    - the rest of the finance office as contacts;
    - mirror hosts, broken links and stopping a crawl;
    - an opt-in browser for pages drawn by scripts.
+8. **Learned weights.** The hand-set weights were guesses. Fitting them on labeled links from 22
+   sites ranks better, and gets ASU right without the LLM.
 
 **Left out on purpose.** All of these matter at scale, but they add little to four test sites.
 Each one is described in [docs/scaling.md](docs/scaling.md):
 - distributed queues, an object store and a recrawl scheduler;
 - reading the text inside documents (OCR) and a search index for it;
-- a classifier trained on the LLM's answers;
+- a learned path score for the crawl queue (only the target score is learned so far);
 - authentication, rate limits and network restrictions on the API. Run it on a trusted
   network.
 
@@ -140,14 +150,16 @@ documents and the contacts, filter by keyword, year and score, and change the ke
 and re-rank the crawl from its saved pages without crawling again. The API docs are at
 http://localhost:3000/docs.
 
-The crawl form has two switches, saved separately for each crawl:
+The crawl form has three switches, saved separately for each crawl:
 - **Respect robots.txt** starts on. It controls robots.txt rules and crawl delays, including
   redirect targets and browser requests, plus page and link `nofollow` directives.
 - **Use LLM** starts on when the server has an LLM API key. Switch it off to rank links and
-  extract contacts with rules alone. Without a key, the switch is disabled.
+  extract contacts without it. Without a key, the switch is disabled.
+- **Learned ranking** starts on. Switch it off to rank with the hand-set rules.
 
 API clients can pass `respect_robots` and `use_llm` as booleans to `POST /v1/crawls`.
 Both default to `true`; without an API key, `use_llm` is saved as `false` for new crawls.
+`ranker` is `learned` (the default) or `rules`.
 The settings are returned with crawl details. Re-ranking on the results page has its own
 LLM choice. Normal request pacing, scope and page limits still apply to every crawl.
 
@@ -235,6 +247,75 @@ that produced it.
 
 The fiscal year comes from the strongest pattern found: "June 30, 2025" or "6-30-25", then
 "FY2026" or "Fiscal Year 2025", then "2025-26" (named by the end year), then a bare year.
+
+### Learned weights (the default ranker)
+
+The weights in the table above are hand-set: my best guesses. The learned ranker reads the same
+evidence and fits the weights on labeled links instead. A crawl picks one with `ranker`
+(`learned`, the default, or `rules`), and `POST /v1/crawls/{id}/rescore` switches an existing
+crawl from disk. The start page and the results page have the same switch.
+
+**Model.** Logistic regression over 22 features of a link for one keyword group
+([src/ranking/learned.ts](src/ranking/learned.ts)):
+- where the keyword sits: link text, URL, heading, nearby text, host name;
+- whether the link text is just the document's name and year, or carries other words;
+- the kind of link: a file, a page on the entity's site, a page on another platform, another
+  government's site, a paper about the document, a menu;
+- the parent page's path score, whether a fiscal year is named, very long link text.
+
+Keyword features are multiplied by the group's weight, so the keyword editor still works, and a
+group at weight 0 is off. The output is the probability that the link itself is a target. The
+year and draft discounts stay hand-set: they are ranking policy, not evidence of relevance, and
+the same ones apply after the LLM. The path score that orders the crawl queue is still hand-set.
+
+**Data.** 22 public bodies: the 4 test sites and 18 others
+([eval/learn/sites.txt](eval/learn/sites.txt): 8 cities, 3 counties, 4 school districts,
+3 universities), crawled with the LLM off. Every link with a keyword signal, once per site and
+link text: 5,402 links ([eval/learn/links.jsonl](eval/learn/links.jsonl)).
+
+**Labels.** `gpt-4.1-mini` labels each link as a target or not, against a strict definition: the
+document itself, not the page that lists it, a presentation, answers to budget questions or
+another government's report. The prompt is in [src/cli/learn.ts](src/cli/learn.ts).
+- All 5,402 labels cost $0.43.
+- A hand check of 60 random labels agreed on 58 ([eval/learn/handcheck.md](eval/learn/handcheck.md)).
+- `gpt-4o-mini` was tried first. It labeled the same kind of link differently from one batch to
+  the next.
+
+**Training.** Newton's method on an L2-penalized log-likelihood
+([src/ranking/logistic.ts](src/ranking/logistic.ts), no dependency). Each site counts the same
+in total. Without that, Dane County's 476 department budget requests set the weights for
+everyone.
+
+**Evaluation: leave one site out.** Each site is scored by a model fitted on the other 21.
+
+| | Hand-set rules | Learned |
+|---|---|---|
+| AUC over all labeled links | 0.762 | 0.833 |
+| Labeled targets among each site's 10 best documents, summed | 118/170 | 132/170 |
+| Sites where the top 10 is better / worse / the same | | 9 / 2 / 7 (4 sites have no documents to rank) |
+
+On the test sites, a model fitted without them, with the LLM off, finds 9 of 9 must-find
+targets and lifts ASU's precision@10 from 7 to 10 (table above).
+
+**What it learned** (log-odds; full table in [eval/results-learned.md](eval/results-learned.md)):
+- **Against a target:** a paper about the document (−3.9), a file matched by a contact title
+  (−2.5), another government's site (−2.3), a page on the entity's own site named for a document
+  (−2.3), other words in the link text besides the name and year (up to −1.6).
+- **For a target:** link text that is only a year under a heading that names it (+4.4), a full
+  name in the link text (+3.0), a fiscal year (+2.4), the keyword in the link text (+1.8), link
+  text that is just the name and year (+1.1).
+- **A surprise:** a keyword only in the URL counts slightly against (−0.6). Language switchers
+  and menu pages carry "budget" in their URLs too.
+
+**Limits.**
+- The reference labels come from an LLM. They are noisy on borderline documents: a budget
+  message, a budget in brief, one department's budget request. The two sites where the rules
+  still win (Raleigh and Travis County) come down mostly to such cases.
+- The model is linear, over features I chose. It cannot use evidence that no feature describes.
+
+**Retrain:** `npm run crawl -- --file eval/learn/sites.txt --no-llm`, then
+`npm run learn -- dataset`, `npm run learn -- label` and `npm run learn -- train`. Train writes
+[src/ranking/learned-weights.ts](src/ranking/learned-weights.ts) and the evaluation.
 
 ### Path score
 

@@ -239,7 +239,7 @@ h3[id] { scroll-margin-top: 24px; }
         <div class="tile">
           <p class="k">Rank</p>
           <h4>Cheapest tier that can decide</h4>
-          <p>Rules score every link for free, with keywords and weights set per crawl. An LLM sees only the links that are still unclear, in batches.</p>
+          <p>Every link is scored for free, with weights learned from labeled links and keywords set per crawl. An LLM sees only the links that are still unclear, in batches.</p>
         </div>
         <div class="tile">
           <p class="k">Extract</p>
@@ -282,7 +282,7 @@ h3[id] { scroll-margin-top: 24px; }
         <table>
           <thead><tr><th>#</th><th>The brief asks for</th><th>Answer</th><th>Where</th></tr></thead>
           <tbody>
-            <tr><td class="num">1</td><td>High-value links on a page, focused on contacts and specific files, ranked by an intelligent approach</td><td>Rules score every link. An LLM decides the unclear ones. Contacts and files come out as their own results, not only as links.</td><td><a href="#ranking">Ranking</a>, <a href="#contacts">Contacts and files</a></td></tr>
+            <tr><td class="num">1</td><td>High-value links on a page, focused on contacts and specific files, ranked by an intelligent approach</td><td>Every link is scored with weights learned from 5,402 labeled links. An LLM decides the unclear ones. Contacts and files come out as their own results, not only as links.</td><td><a href="#ranking">Ranking</a>, <a href="#contacts">Contacts and files</a></td></tr>
             <tr><td class="num">2</td><td>Adjustable keyword prioritization, such as "Budget", "ACFR" and "Finance Director"</td><td>Each crawl takes its own keywords, weights and synonyms.</td><td><a href="#keywords">Keywords</a></td></tr>
             <tr><td class="num">3</td><td>An API to access the data, with good architecture and design</td><td>Versioned REST, crawls in the background, filters, keyset pagination, one error shape, generated OpenAPI docs, and a live event stream.</td><td><a href="#api">API</a>, <a href="#live">Live view</a></td></tr>
             <tr><td class="num">4</td><td>Store URL, type, relevance score and keywords, built for scale</td><td>One Postgres. Unique keys make every write an idempotent upsert, writes are batched per page, and indexes match the API's filters.</td><td><a href="#data">Data model</a></td></tr>
@@ -480,7 +480,7 @@ h3[id] { scroll-margin-top: 24px; }
         </li>
         <li class="layer">
           <div class="layer-name"><span class="layer-k">Ranking and extraction</span><span class="layer-role">Scores every link and pulls out contacts, cheapest tier first</span></div>
-          <div class="chips"><span class="chip">Rules in TypeScript</span><span class="chip cost">gpt-4o-mini · JSON schema</span></div>
+          <div class="chips"><span class="chip">Rule signals in TypeScript</span><span class="chip">Logistic regression, learned weights</span><span class="chip cost">gpt-4o-mini · JSON schema</span></div>
         </li>
         <li class="layer">
           <div class="layer-name"><span class="layer-k">Documents</span><span class="layer-role">Reads the text layer behind vague PDF links</span></div>
@@ -812,7 +812,7 @@ returning f.url, f.host;
       </figure>
 
       <h3>Tier 1: rule signals</h3>
-      <p>The score is a weighted sum, clipped to 0–1, stored with the list of signals that fired. These are starting weights, calibrated against the labeled set.</p>
+      <p>The score is a weighted sum, clipped to 0–1, stored with the list of signals that fired. These are the hand-set weights; the learned ranker below fits them on labeled links instead.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Signal</th><th>Example</th><th>Start weight</th></tr></thead>
@@ -829,6 +829,17 @@ returning f.url, f.host;
           </tbody>
         </table>
       </div>
+
+      <h3 id="learned">Learned weights · the default</h3>
+      <p>The weights above were set by hand. The learned ranker reads the same evidence and fits the weights by logistic regression on labeled links. Each crawl chooses: <code>ranker</code> is <code>learned</code> (the default) or <code>rules</code>, and a re-rank can switch a finished crawl from its saved pages.</p>
+      <ul class="list">
+        <li><strong>Features:</strong> 22 per link and keyword group. They cover where the keyword sits (link text, URL, heading, nearby text, host name) and whether the link text is just the document's name and year. They also cover the kind of link: a file, a page on the entity's own site, another platform, another government's site, a paper about the document, a menu. Keyword features scale with the group's weight, so the keyword editor still works.</li>
+        <li><strong>Policy stays explicit:</strong> the year and draft discounts are applied after the model, as after the LLM. They are a ranking choice, not evidence of relevance.</li>
+        <li><strong>Data:</strong> 22 public bodies, the four test sites and 18 others: cities, counties, school districts and universities. That gives 5,402 links with a keyword signal.</li>
+        <li><strong>Labels:</strong> <code>gpt-4.1-mini</code> labeled every link against a strict definition of a target: the document itself, not its list page, a presentation or another government's report. All the labels cost $0.43. A hand check agreed on 58 of 60.</li>
+        <li><strong>Training:</strong> Newton's method in about 100 lines, with no dependency. Every site counts the same, so one county's 476 department budget requests cannot set the weights for everyone.</li>
+        <li><strong>Result, leave one site out:</strong> AUC 0.833 against 0.762 for the hand-set weights. Labeled targets among each site's ten best documents: 132 of 170 against 118. On the test sites, a model that never saw them finds 9 of 9 must-find targets and gets ASU to 10 of 10 without the LLM.</li>
+      </ul>
 
       <h3 id="keywords">Configurable keywords</h3>
       <p>Each crawl takes its own keyword set. Synonyms matter in public finance: the ACFR was called the CAFR until 2021, and the person you want might be titled Treasurer or Comptroller.</p>
@@ -1147,7 +1158,8 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
         <li><strong>Precision@10 for documents:</strong> how many of the ten best name a finance document in the link text, the URL or the heading above the link, and belong to the entity. A host listed as someone else's, such as the State of Arizona's budget office, never counts. With the LLM it is 10 of 10 at all three reachable sites; with rules alone, 7 of 10 at ASU.</li>
         <li><strong>Cost per tier:</strong> how many links the LLM decided, and what the run cost.</li>
         <li><strong>The same crawls, ranked twice:</strong> once with the LLM and once with rules alone, from the saved pages. Results are in <code>eval/results.md</code> and <code>eval/results-rules-only.md</code>.</li>
-        <li><strong>Not built:</strong> a hand-labeled set of about 50 links per site, and a CI check that fails the build when precision drops.</li>
+        <li><strong>A labeled set across 22 sites:</strong> 5,402 links labeled by an LLM and spot-checked by hand, scored leave-one-site-out. The learned weights beat the hand-set ones on 9 sites, lose on 2 and tie on 7. Details are in <code>eval/results-learned.md</code>.</li>
+        <li><strong>Not built:</strong> a CI check that fails the build when precision drops.</li>
       </ul>
     </section>
 
@@ -1185,7 +1197,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
             <tr><td>Seen set</td><td>Postgres unique key on the URL hash</td><td>Bloom filter in Redis, with the Postgres key as the final word</td></tr>
             <tr><td>Fetching</td><td>One request at a time per site, with a delay. Script-built pages are flagged, and rendered when the render tier is on.</td><td>Stateless fetcher pool plus a separate browser pool</td></tr>
             <tr><td>Raw pages</td><td>Gzip files on local disk, keyed by URL hash</td><td>Object store keyed by content hash</td></tr>
-            <tr><td>Ranking</td><td>Rules → LLM</td><td>Rules → embeddings → LLM, plus a small classifier trained on the LLM's labels</td></tr>
+            <tr><td>Ranking</td><td>Learned weights over the rule signals → LLM</td><td>Learned weights → embeddings → LLM, with a richer model trained on many more labels, and a learned path score for the queue</td></tr>
             <tr><td>Contacts</td><td>Rules find emails and phones, the LLM reads name and title, the code checks both against the page</td><td>Same, plus matching the same person across sites and noticing when someone leaves</td></tr>
             <tr><td>Documents</td><td>Ranked by their link.</td><td>Full text, OCR for scans, chunked and embedded</td></tr>
             <tr><td>Storage</td><td>One Postgres</td><td>Postgres as source of truth, plus a search index fed by CDC</td></tr>
@@ -1365,6 +1377,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
             <tr><td>Scores stored per crawl</td><td>Keywords are set per crawl, so a score only means something next to the keywords that produced it.</td><td>More rows, and reading a link's score needs a join.</td></tr>
             <tr><td>Contacts checked against the page text</td><td>An LLM can produce a plausible email that is not on the page. Only values found in the page are stored.</td><td>Contacts shown as images or behind forms are missed.</td></tr>
             <tr><td>Focused crawl with a page budget</td><td>Pursuit needs a few high-value documents per entity, not a full copy of every site.</td><td>Might miss a target buried under an unpromising path. The labeled set measures this.</td></tr>
+            <tr><td>Learned weights over hand-picked features</td><td>The hand-set weights were guesses. A linear model over the same evidence ranks better, stays explainable weight by weight, and runs free on every link.</td><td>The labels come from an LLM and are noisy on borderline documents. The model cannot use evidence no feature describes.</td></tr>
             <tr><td>Rules first, LLM last</td><td>Cost, speed and repeatable results. Every decision records which tier made it.</td><td>Rules need tuning per keyword set.</td></tr>
             <tr><td>One database to start</td><td>No dual writes to keep in sync. Filters and full-text search run in one query.</td><td>Search and storage scale together until the split trigger is reached.</td></tr>
             <tr><td>Store every sighting</td><td>Customers trust a result they can trace. Debugging a bad score starts from its source.</td><td>More rows. Cheap compared with the value.</td></tr>

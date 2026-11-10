@@ -1,0 +1,29 @@
+# Training sites for the learned ranker: public bodies other than the four test sites, crawled
+# without the LLM (npm run crawl -- --file eval/learn/sites.txt --no-llm). A mix of cities,
+# counties, school districts and universities, so the model does not learn one site's layout.
+
+# Cities
+https://www.austintexas.gov/
+https://www.cityofpaloalto.org/
+https://bouldercolorado.gov/
+https://www.cityofmadison.com/
+https://raleighnc.gov/
+https://www.tempe.gov/
+https://www.fcgov.com/
+https://www.santamonica.gov/
+
+# Counties
+https://www.danecounty.gov/
+https://www.traviscountytx.gov/
+https://www.washoecounty.gov/
+
+# School districts
+https://www.austinisd.org/
+https://www.bvsd.org/
+https://www.lwsd.org/
+https://www.roundrockisd.org/
+
+# Universities
+https://www.colorado.edu/
+https://www.unm.edu/
+https://www.boisestate.edu/

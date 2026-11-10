@@ -1,24 +1,28 @@
 import type { AppContext } from "../app.js";
 import { findContacts } from "../ranking/contacts.js";
 import { compileKeywords, type KeywordConfig } from "../ranking/keywords.js";
-import { RANKER_VERSION, scoreLink } from "../ranking/rules.js";
+import { type RankerName, rankerName, rankerVersion, rankLink } from "../ranking/rank.js";
 import { applyLlmTier } from "../ranking/tier.js";
 import * as repo from "../store/repo.js";
 import { extractPage, type LinkCandidate, parseHtml } from "./extract.js";
 import { readRaw } from "./rawstore.js";
 import { hostOf, inScope, mirrorOf, unmirror, urlHash } from "./url.js";
 
+export interface SavedPage {
+  p: { id: number; url: string; final_url: string | null; raw_path: string; path_score: number; depth: number };
+  /** The page's URL, with a mirror host mapped back to the original. */
+  pageUrl: string;
+  $: ReturnType<typeof parseHtml>;
+  page: ReturnType<typeof extractPage>;
+}
+
 /**
- * Ranks a finished crawl again from the raw pages saved on disk, without fetching anything:
- * after a change to the rules, or with a different keyword set. With llm, the LLM tier runs too.
- * The raw file of a URL is its latest fetch, which may come from a later crawl.
+ * The pages a finished crawl ranked, read back from the raw files on disk, with their links
+ * as the crawl saw them (mirror hosts mapped back to the original host). Shared by re-ranking
+ * and by the learned ranker's dataset builder.
  */
-export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { keywords?: KeywordConfig; llm?: boolean } = {}) {
-  const { keywords } = opts;
-  const llm = opts.llm ? ctx.llm : null;
-  const crawl = await repo.getCrawl(ctx.db, crawlId);
-  if (!crawl) throw new Error(`crawl ${crawlId} not found`);
-  const groups = compileKeywords(keywords ?? crawl.keywords);
+export async function readSavedPages(ctx: AppContext, crawl: repo.CrawlRow) {
+  const crawlId = crawl.id;
   const scope = { domain: crawl.scope_domain, extraHosts: new Set(crawl.extra_hosts) };
   // Pages the crawl read as copies of a page already read ("same content", "same page as") were
   // not ranked during the crawl, so they are not ranked here either.
@@ -37,12 +41,9 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
     [crawlId],
   );
   const fileTypes = new Map(learned.rows.map((r) => [r.url, r.file_type!]));
-  await ctx.db.query("delete from link_scores where crawl_id = $1", [crawlId]);
-  await ctx.db.query("delete from sightings where crawl_id = $1", [crawlId]);
-  await ctx.db.query("delete from contacts where crawl_id = $1", [crawlId]);
 
   let missing = 0;
-  const read: { p: (typeof pages.rows)[number]; pageUrl: string; $: ReturnType<typeof parseHtml>; page: ReturnType<typeof extractPage> }[] = [];
+  const read: SavedPage[] = [];
   for (const p of pages.rows) {
     let html: string;
     try {
@@ -63,22 +64,50 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
     if (m && !mirrors.has(m.host)) mirrors.set(m.host, m.origin);
   }
 
-  let links = 0;
-  let contacts = 0;
-  for (const { p, pageUrl: fetchedUrl, $, page } of read) {
-    const pageUrl = mirrorOf(fetchedUrl, page.canonical, scope) ? page.canonical! : fetchedUrl;
+  for (const r of read) {
+    if (mirrorOf(r.pageUrl, r.page.canonical, scope)) r.pageUrl = r.page.canonical!;
     if (mirrors.size) {
       const byUrl = new Map<string, LinkCandidate>();
-      for (const l of page.links) {
+      for (const l of r.page.links) {
         const url = unmirror(l.url, mirrors);
         const prev = byUrl.get(url);
         if (!prev || (prev.boilerplate && !l.boilerplate)) byUrl.set(url, { ...l, url });
       }
-      page.links = [...byUrl.values()];
+      r.page.links = [...byUrl.values()];
     }
+  }
+  return { pages: read, total: pages.rows.length, missing, mirrors, fileTypes, scope };
+}
+
+/**
+ * Ranks a finished crawl again from the raw pages saved on disk, without fetching anything:
+ * after a change to the rules, with a different keyword set, or with the other ranker. With
+ * llm, the LLM tier runs too. The raw file of a URL is its latest fetch, which may come from a
+ * later crawl.
+ */
+export async function rescoreCrawl(
+  ctx: AppContext,
+  crawlId: string,
+  opts: { keywords?: KeywordConfig; llm?: boolean; ranker?: RankerName } = {},
+) {
+  const { keywords } = opts;
+  const llm = opts.llm ? ctx.llm : null;
+  const crawl = await repo.getCrawl(ctx.db, crawlId);
+  if (!crawl) throw new Error(`crawl ${crawlId} not found`);
+  const groups = compileKeywords(keywords ?? crawl.keywords);
+  const version = opts.ranker ? rankerVersion(opts.ranker) : crawl.ranker_version;
+  const { pages: read, total, missing, mirrors, fileTypes, scope } = await readSavedPages(ctx, crawl);
+  await ctx.db.query("delete from link_scores where crawl_id = $1", [crawlId]);
+  await ctx.db.query("delete from sightings where crawl_id = $1", [crawlId]);
+  await ctx.db.query("delete from contacts where crawl_id = $1", [crawlId]);
+  if (version !== crawl.ranker_version) await ctx.db.query("update crawls set ranker_version = $2 where id = $1", [crawlId, version]);
+
+  let links = 0;
+  let contacts = 0;
+  for (const { p, pageUrl, $, page } of read) {
     const all = page.links.map((link) => ({
       link,
-      s: scoreLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope), contentTypeFileType: fileTypes.get(link.url) }),
+      s: rankLink(link, { groups, parentPathScore: p.path_score, internal: inScope(link.url, scope), contentTypeFileType: fileTypes.get(link.url) }, version),
     }));
     if (llm) await applyLlmTier(llm, groups, all); // answers seen before come from the cache, free
     const scored = all.filter((x) => x.s.targetScore > 0);
@@ -87,7 +116,7 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
       crawlId,
       p.id,
       p.depth,
-      RANKER_VERSION,
+      version,
       scored.map(({ link, s }) => ({
         hash: urlHash(link.url),
         url: link.url,
@@ -132,5 +161,5 @@ export async function rescoreCrawl(ctx: AppContext, crawlId: string, opts: { key
       contacts += fresh.length;
     }
   }
-  return { pages: pages.rows.length, links, contacts, missing, mirrors: [...mirrors.keys()] };
+  return { pages: total, links, contacts, missing, mirrors: [...mirrors.keys()], ranker: rankerName(version) };
 }

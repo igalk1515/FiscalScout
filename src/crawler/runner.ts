@@ -4,7 +4,8 @@ import type { EventBus } from "../events.js";
 import { findContacts } from "../ranking/contacts.js";
 import { compileKeywords, type CompiledGroup } from "../ranking/keywords.js";
 import type { CallInfo, LlmClient } from "../ranking/llm.js";
-import { RANKER_VERSION, scoreLink, SOCIAL_HOSTS, type LinkScore } from "../ranking/rules.js";
+import { rankerName, rankLink } from "../ranking/rank.js";
+import { SOCIAL_HOSTS, type LinkScore } from "../ranking/rules.js";
 import { applyLlmTier } from "../ranking/tier.js";
 import * as repo from "../store/repo.js";
 import { extractPage, parseHtml, type LinkCandidate } from "./extract.js";
@@ -186,6 +187,7 @@ export class CrawlRunner {
       keywords: Object.keys(crawl.keywords),
       respect_robots: crawl.respect_robots,
       llm: crawl.use_llm && this.o.llm.enabled ? this.o.llm.model : null,
+      ranker: rankerName(crawl.ranker_version),
     });
 
     const ticker = setInterval(() => {
@@ -514,7 +516,7 @@ export class CrawlRunner {
     // ---- rank every link on the page
     const scored = page.links.map((link) => ({
       link,
-      s: scoreLink(link, { groups: state.groups, parentPathScore: item.path_score, internal: inScope(link.url, scope) }),
+      s: rankLink(link, { groups: state.groups, parentPathScore: item.path_score, internal: inScope(link.url, scope) }, state.crawl.ranker_version),
     }));
     await applyLlmTier(this.llmFor(state), state.groups, scored, this.onLlmCall(state));
 
@@ -524,7 +526,7 @@ export class CrawlRunner {
       id,
       pageId,
       item.depth,
-      RANKER_VERSION,
+      state.crawl.ranker_version,
       results.map(({ link, s }) => ({
         hash: urlHash(link.url),
         url: link.url,

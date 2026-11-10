@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { KeywordsSchema } from "../ranking/keywords.js";
+import { DEFAULT_RANKER, RANKER_NAMES } from "../ranking/rank.js";
 
 export const ErrorOut = z
   .object({
@@ -20,6 +21,10 @@ export const CreateCrawlBody = z.object({
   page_budget: z.number().int().min(1).max(5000).default(300).describe("Most pages fetched in this crawl"),
   respect_robots: z.boolean().default(true).describe("Respect robots.txt rules, crawl delays and nofollow directives"),
   use_llm: z.boolean().default(true).describe("Use the LLM for ranking and contacts when a server API key is configured"),
+  ranker: z
+    .enum(RANKER_NAMES)
+    .default(DEFAULT_RANKER)
+    .describe("learned: weights fitted on labeled links (default). rules: the hand-set weights."),
 });
 
 const Counters = z.object({
@@ -48,6 +53,7 @@ export const CrawlOut = z.object({
   page_budget: z.number(),
   respect_robots: z.boolean(),
   use_llm: z.boolean(),
+  ranker: z.enum(RANKER_NAMES),
   extra_hosts: z.array(z.string()),
   counters: Counters,
   now_fetching: z.array(z.string()),
@@ -132,6 +138,7 @@ export const ContactsQuery = crawlOrHost({
 export const RescoreBody = z.object({
   keywords: KeywordsSchema.optional().describe("New keyword groups and weights. Omit to re-rank with the crawl's own keywords."),
   llm: z.boolean().default(false).describe("Run the LLM tier too. Answers seen before come from the cache; new ones cost a little."),
+  ranker: z.enum(RANKER_NAMES).optional().describe("Switch the crawl to this ranker. Omit to keep the crawl's own."),
 });
 
 export const RescoreOut = z.object({

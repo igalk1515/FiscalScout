@@ -485,7 +485,7 @@ export interface LinkRecord {
   pathScore: number;
   matchedKeywords: string[];
   reason: string;
-  decidedBy: "rules" | "llm";
+  decidedBy: "rules" | "llm" | "learned";
   anchor: string;
   heading: string;
   context: string;

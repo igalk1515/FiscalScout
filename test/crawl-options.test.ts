@@ -127,8 +127,37 @@ describe("per-crawl options", () => {
       if (!options.use_llm) {
         expect(saved.counters).toMatchObject({ llm_calls: 0, llm_cost_usd: 0, contacts: 1 });
         const links = await db.query("select distinct decided_by from link_scores where crawl_id = $1", [id]);
-        expect(links.rows).toEqual([{ decided_by: "rules" }]);
+        expect(links.rows.map((r) => r.decided_by)).not.toContain("llm");
       }
+    } finally {
+      await site.close();
+    }
+  });
+
+  it("ranks with the learned weights by default and with the rules on request, and re-ranks with either", async () => {
+    const site = await startServer({
+      "/": html('<h2>Annual Budgets</h2><a href="/files/fy2026-adopted-budget.pdf">Adopted Budget FY2026</a>'),
+      "/files/fy2026-adopted-budget.pdf": text("%PDF-1.4"),
+    });
+    try {
+      const decided = async (id: string) =>
+        (await db.query("select distinct decided_by from link_scores where crawl_id = $1", [id])).rows.map((r) => r.decided_by);
+      const learned = (await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: site.url, max_depth: 0, use_llm: false } })).json();
+      expect(learned.ranker).toBe("learned");
+      await ctx.runner.start(learned.id);
+      expect(await decided(learned.id)).toEqual(["learned"]);
+
+      const rules = (
+        await app.inject({ method: "POST", url: "/v1/crawls", payload: { url: `${site.url}?r=1`, max_depth: 0, use_llm: false, ranker: "rules" } })
+      ).json();
+      expect(rules.ranker).toBe("rules");
+      await ctx.runner.start(rules.id);
+      expect(await decided(rules.id)).toEqual(["rules"]);
+
+      const re = await app.inject({ method: "POST", url: `/v1/crawls/${rules.id}/rescore`, payload: { ranker: "learned" } });
+      expect(re.statusCode).toBe(200);
+      expect(re.json().crawl.ranker).toBe("learned");
+      expect(await decided(rules.id)).toEqual(["learned"]);
     } finally {
       await site.close();
     }

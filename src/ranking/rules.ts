@@ -23,7 +23,7 @@ export interface LinkScore {
   reason: string;
   noise: boolean;
   /** Set to "llm" when the LLM tier replaced the rules score. */
-  decidedBy?: "rules" | "llm";
+  decidedBy?: "rules" | "llm" | "learned";
   /** The link points inside the crawl's scope. */
   internal?: boolean;
   /** A paper about a document ("Budget Responses", "Hearing Notice"), not the document itself. */
@@ -70,10 +70,20 @@ const WEAK_HUB =
   /(?<![a-z])(departments?|government|administration|city hall|about|leadership|documents?|document center|reports|publications|open data|directory|staff|offices?|board|council|agendas?|minutes)(?![a-z])/i;
 
 /** Papers about a document rather than the document: "FY27 Budget Responses", "Budget Hearing Notice". */
-const SUPPORTING_PAPER =
+export const SUPPORTING_PAPER =
   /(?<![a-z])(responses?|questions?|q ?& ?a|faq|memos?|memorandum|presentations?|slides|hearings?|notices?|agendas?|minutes|survey|resolutions?|amendments?|transmittal|timeline|calendar|work ?sessions?|press release|public comment|workshop|rfp|rfq|rfi|bids?|addend(um|a)|solicitations?)(?![a-z])/i;
 
 const round = (n: number) => Math.round(Math.max(0, Math.min(1, n)) * 1000) / 1000;
+
+/** Where one keyword group's terms appear around a link. The rules and the learned ranker share it. */
+export function groupMatches(g: CompiledGroup, link: LinkCandidate, u: URL) {
+  const inAnchor = matchText(g, link.anchor);
+  const inUrl = matchUrlPart(g, `${u.pathname} ${u.search}`) ?? (link.titleAttr ? matchText(g, link.titleAttr) : null);
+  const inHost = matchUrlPart(g, u.hostname.split(".").slice(0, -2).join(" "));
+  const inHeading = matchText(g, link.heading);
+  const inContext = inHeading ? null : matchText(g, link.context);
+  return { inAnchor, inUrl, inHost, inHeading, inContext };
+}
 
 /**
  * Scores one link with weighted rule signals. Every score comes with the list of signals that
@@ -88,7 +98,6 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
   const type: "document" | "page" = isDoc ? "document" : "page";
 
   const anchor = link.anchor;
-  const pathPart = `${u.pathname} ${u.search}`;
   const fileName = u.pathname.split("/").pop() ?? "";
   const year = fiscalYear([anchor, link.titleAttr, urlWords(fileName), urlWords(u.pathname), link.heading, link.context]);
   const draft = isDraft([anchor, link.titleAttr, u.pathname]);
@@ -106,11 +115,7 @@ export function scoreLink(link: LinkCandidate, ctx: ScoreContext): LinkScore {
   let bestPath = { value: 0, notes: [] as string[] };
 
   for (const g of ctx.groups) {
-    const inAnchor = matchText(g, anchor);
-    const inUrl = matchUrlPart(g, pathPart) ?? (link.titleAttr ? matchText(g, link.titleAttr) : null);
-    const inHost = matchUrlPart(g, u.hostname.split(".").slice(0, -2).join(" "));
-    const inHeading = matchText(g, link.heading);
-    const inContext = inHeading ? null : matchText(g, link.context);
+    const { inAnchor, inUrl, inHost, inHeading, inContext } = groupMatches(g, link, u);
     for (const m of [inAnchor, inUrl, inHost, inHeading, inContext]) if (m) matched.add(m);
 
     // Target score: is this link the thing itself?

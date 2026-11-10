@@ -8,7 +8,7 @@ import { migrate } from "./db/migrate.js";
 import { EventBus } from "./events.js";
 import { DEFAULT_KEYWORDS, type KeywordConfig } from "./ranking/keywords.js";
 import { createLlm, dbCache, type LlmClient } from "./ranking/llm.js";
-import { RANKER_VERSION } from "./ranking/rules.js";
+import { DEFAULT_RANKER, type RankerName, rankerVersion } from "./ranking/rank.js";
 import * as repo from "./store/repo.js";
 
 export interface AppContext {
@@ -102,6 +102,7 @@ export interface CrawlInput {
   pageBudget?: number;
   respectRobots?: boolean;
   useLlm?: boolean;
+  ranker?: RankerName;
   idempotencyKey?: string | null;
 }
 
@@ -120,7 +121,7 @@ export async function startCrawl(ctx: AppContext, input: CrawlInput) {
       respectRobots: input.respectRobots ?? true,
       useLlm: (input.useLlm ?? true) && ctx.llm.enabled,
       scopeDomain: registrableDomain(host),
-      rankerVersion: RANKER_VERSION,
+      rankerVersion: rankerVersion(input.ranker ?? DEFAULT_RANKER),
       idempotencyKey: input.idempotencyKey ?? null,
     },
     { hash: urlHash(seed), host },

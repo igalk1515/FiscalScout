@@ -62,6 +62,10 @@
         <input id="use-llm" type="checkbox" role="switch" disabled aria-labelledby="llm-label" aria-describedby="llm-hint">
         <span><strong id="llm-label">Use LLM</strong><small id="llm-hint" aria-live="polite">Checking availability…</small></span>
       </label>
+      <label class="toggle">
+        <input id="learned" type="checkbox" role="switch" checked aria-labelledby="learned-label" aria-describedby="learned-hint">
+        <span><strong id="learned-label">Learned ranking</strong><small id="learned-hint">Weights fitted on labeled links. Off: the hand-set rules.</small></span>
+      </label>
     </div>
   </form>
   <details class="kw">
@@ -107,6 +111,7 @@
       page_budget: Number(document.getElementById("budget").value),
       respect_robots: document.getElementById("respect-robots").checked,
       use_llm: llmToggle.checked,
+      ranker: document.getElementById("learned").checked ? "learned" : "rules",
     };
     try { if (editor) body.keywords = editor.value(); } catch (x) { err.textContent = x.message; return; }
     const r = await fetch("/v1/crawls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

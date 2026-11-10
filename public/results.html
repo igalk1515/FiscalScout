@@ -70,12 +70,13 @@
 </header>
 <div class="page">
   <details id="kw-box">
-    <summary>Keywords and weights</summary>
+    <summary>Keywords, weights and ranking</summary>
     <div class="body">
-      <p class="hint">Change what counts and how much, then re-rank. Every page this crawl saved is ranked again from disk: nothing is fetched, and without the LLM it costs nothing.</p>
+      <p class="hint">Change what counts and how much, or switch the ranker, then re-rank. Every page this crawl saved is ranked again from disk: nothing is fetched, and without the LLM it costs nothing.</p>
       <div id="kw"></div>
       <div class="rerank">
         <button class="primary" id="rerank">Re-rank from saved pages</button>
+        <label>Ranking <select id="ranker"><option value="learned">Learned weights</option><option value="rules">Hand-set rules</option></select></label>
         <label><input type="checkbox" id="use-llm"> Use the LLM too (costs a little)</label>
         <span id="rerank-status" class="muted"></span>
       </div>
@@ -199,14 +200,14 @@
     status.textContent = "Re-ranking every saved page… (up to half a minute)";
     const r = await fetch(`/v1/crawls/${id}/rescore`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ keywords, llm: $("use-llm").checked }),
+      body: JSON.stringify({ keywords, llm: $("use-llm").checked, ranker: $("ranker").value }),
     });
     const j = await r.json();
     $("rerank").disabled = false;
     if (!r.ok) { status.className = "err"; status.textContent = j.error ? j.error.message : "re-rank failed"; return; }
     crawl = j.crawl;
     status.className = "muted";
-    status.textContent = `Re-ranked ${j.rescored.pages} pages in ${(j.rescored.ms / 1000).toFixed(1)} s: ${crawl.counters.results} results, ${crawl.counters.contacts} contacts.`;
+    status.textContent = `Re-ranked ${j.rescored.pages} pages in ${(j.rescored.ms / 1000).toFixed(1)} s with the ${crawl.ranker === "learned" ? "learned weights" : "hand-set rules"}: ${crawl.counters.results} results, ${crawl.counters.contacts} contacts.`;
     fillKeywordSelects(crawl.keywords);
     await Promise.all([loadDocs(false), loadContacts()]);
   };
@@ -225,6 +226,7 @@
     $("status").className = "pill " + c.status;
     $("live").href = `/live/${id}`;
     editor = KeywordEditor($("kw"), c.keywords, kw.default);
+    $("ranker").value = c.ranker;
     if (!health.llm) { $("use-llm").disabled = true; $("use-llm").parentElement.title = "No OPENAI_API_KEY on this server"; }
     const running = ["queued", "running"].includes(c.status);
     if (running) {

@@ -1,8 +1,10 @@
 // Crawl from the command line and print a summary.
 // Usage:
-//   npm run crawl -- https://www.a2gov.org/ [--depth 3] [--budget 300]
+//   npm run crawl -- https://www.a2gov.org/ [--depth 3] [--budget 300] [--no-llm]
+//   npm run crawl -- --file eval/learn/sites.txt --no-llm   (one URL per line, # comments)
 //   npm run crawl:test-sites            (the four test sites, in parallel)
 // If the API is running, each crawl can be watched at http://localhost:3000/live/<id>.
+import { readFileSync } from "node:fs";
 import { createContext, startCrawl } from "../app.js";
 import { TEST_SITES } from "./test-sites.js";
 
@@ -13,17 +15,28 @@ const flag = (name: string, fallback: number) => {
 };
 const depth = flag("--depth", 3);
 const budget = flag("--budget", 300);
-const seeds = args.includes("--test-sites") ? TEST_SITES.map((s) => s.seed) : args.filter((a) => /^https?:\/\//.test(a));
+const useLlm = !args.includes("--no-llm");
+const fileIdx = args.indexOf("--file");
+const fromFile =
+  fileIdx >= 0
+    ? readFileSync(args[fileIdx + 1]!, "utf8")
+        .split(/\r?\n/)
+        .map((l) => l.replace(/#.*/, "").trim())
+        .filter(Boolean)
+    : [];
+const seeds = args.includes("--test-sites")
+  ? TEST_SITES.map((s) => s.seed)
+  : [...args.filter((a) => /^https?:\/\//.test(a)), ...fromFile.filter((a) => /^https?:\/\//.test(a))];
 if (!seeds.length) {
-  console.error("usage: npm run crawl -- <url> [--depth N] [--budget N]   or   npm run crawl:test-sites");
+  console.error("usage: npm run crawl -- <url>... [--file list.txt] [--depth N] [--budget N] [--no-llm]   or   npm run crawl:test-sites");
   process.exit(1);
 }
 
 const ctx = await createContext({ log: { info: () => {}, warn: (o, m) => console.warn(m ?? "", o), error: (o, m) => console.error(m ?? "", o) } });
 const port = ctx.config.PORT;
-console.log(`LLM: ${ctx.llm.enabled ? ctx.llm.model : "off (no OPENAI_API_KEY): rules only"}`);
+console.log(`LLM: ${!useLlm ? "off (--no-llm): rules only" : ctx.llm.enabled ? ctx.llm.model : "off (no OPENAI_API_KEY): rules only"}`);
 
-const crawls = await Promise.all(seeds.map((url) => startCrawl(ctx, { url, maxDepth: depth, pageBudget: budget })));
+const crawls = await Promise.all(seeds.map((url) => startCrawl(ctx, { url, maxDepth: depth, pageBudget: budget, useLlm })));
 for (const { crawl } of crawls) {
   console.log(`started ${crawl.seed_url}  ->  http://localhost:${port}/live/${crawl.id}`);
   let pages = 0;

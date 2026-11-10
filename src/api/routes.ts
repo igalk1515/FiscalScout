@@ -9,6 +9,7 @@ import { rescoreCrawl } from "../crawler/rescore.js";
 import { registrableDomain } from "../crawler/url.js";
 import type { CrawlEvent } from "../events.js";
 import { DEFAULT_KEYWORDS, KeywordsSchema } from "../ranking/keywords.js";
+import { rankerName } from "../ranking/rank.js";
 import * as repo from "../store/repo.js";
 import {
   ContactsOut,
@@ -55,6 +56,7 @@ async function crawlView(ctx: AppContext, c: repo.CrawlRow): Promise<z.infer<typ
     page_budget: c.page_budget,
     respect_robots: c.respect_robots,
     use_llm: c.use_llm,
+    ranker: rankerName(c.ranker_version),
     extra_hosts: c.extra_hosts,
     counters: {
       pages_done: k.pages_done,
@@ -117,6 +119,7 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
         pageBudget: req.body.page_budget,
         respectRobots: req.body.respect_robots,
         useLlm: req.body.use_llm,
+        ranker: req.body.ranker,
         idempotencyKey: req.headers["idempotency-key"] ?? null,
       });
       if (!created) reply.header("idempotent-replayed", "true");
@@ -373,9 +376,9 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
       try {
         const t0 = Date.now();
         const keywords = req.body.keywords ?? crawl.keywords;
-        const r = await rescoreCrawl(ctx, crawl.id, { keywords, llm: req.body.llm && ctx.llm.enabled });
+        const r = await rescoreCrawl(ctx, crawl.id, { keywords, llm: req.body.llm && ctx.llm.enabled, ranker: req.body.ranker });
         if (req.body.keywords) await repo.setCrawlKeywords(ctx.db, crawl.id, req.body.keywords);
-        await ctx.events.emit(crawl.id, "crawl.rescored", { keywords: Object.keys(keywords), links: r.links, contacts: r.contacts });
+        await ctx.events.emit(crawl.id, "crawl.rescored", { keywords: Object.keys(keywords), ranker: r.ranker, links: r.links, contacts: r.contacts });
         const fresh = (await repo.getCrawl(ctx.db, crawl.id))!;
         return { crawl: await crawlView(ctx, fresh), rescored: { pages: r.pages, links: r.links, contacts: r.contacts, ms: Date.now() - t0 } };
       } finally {

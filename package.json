@@ -19,7 +19,8 @@
     "eval": "tsx src/cli/eval.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "rescore": "tsx src/cli/rescore.ts"
+    "rescore": "tsx src/cli/rescore.ts",
+    "learn": "tsx src/cli/learn.ts"
   },
   "dependencies": {
     "@fastify/swagger": "9.4.2",
