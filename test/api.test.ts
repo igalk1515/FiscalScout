@@ -176,6 +176,9 @@ describe("reading results", () => {
     expect(Object.keys(spec.paths)).toEqual(expect.arrayContaining(["/v1/crawls", "/v1/links", "/v1/contacts", "/v1/crawls/{id}/events"]));
     expect((await app.inject({ url: `/live/${crawlId}` })).body).toContain("EventSource");
     expect((await app.inject({ url: "/" })).statusCode).toBe(200);
+    const design = await app.inject({ url: "/architecture" });
+    expect(design.statusCode).toBe(200);
+    expect(design.body).toContain("<title>");
   });
 });
 

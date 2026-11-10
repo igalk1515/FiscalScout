@@ -19,7 +19,8 @@ every crawl.
 - **Running it at millions of pages a day:** [docs/scaling.md](docs/scaling.md), with numbers
   measured on the test crawls and what would break first.
 - **How each build step was checked, and what the real sites taught:** [docs/build-log.md](docs/build-log.md).
-- **The plan written before the build:** [docs/design.html](docs/design.html) (open it in a browser).
+- **The plan written before the build:** [docs/design.html](docs/design.html) (open it in a browser, or at `/architecture`
+  when the server runs).
 
 ---
 

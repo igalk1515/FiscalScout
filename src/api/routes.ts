@@ -32,6 +32,7 @@ import {
 } from "./schemas.js";
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../public");
+const DESIGN_PAGE = resolve(dirname(fileURLToPath(import.meta.url)), "../../docs/design.html");
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 /** Files the pages load from /assets. */
 const ASSETS: Record<string, string> = { "keywords.js": "text/javascript; charset=utf-8" };
@@ -451,6 +452,12 @@ export function registerRoutes(root: FastifyInstance, ctx: AppContext) {
   root.get("/", { schema: { hide: true } }, async (_req, reply) => {
     reply.type("text/html; charset=utf-8");
     return readFile(resolve(PUBLIC_DIR, "index.html"), "utf8");
+  });
+
+  // The design document: architecture, decisions and what was built.
+  root.get("/architecture", { schema: { hide: true } }, async (_req, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return readFile(DESIGN_PAGE, "utf8");
   });
 
   root.get("/results/:id", { schema: { hide: true } }, async (_req, reply) => {

@@ -5,3 +5,4 @@ data
 .git
 test
 docs
+!docs/design.html

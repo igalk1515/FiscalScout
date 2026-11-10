@@ -19,6 +19,7 @@ RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
 COPY public ./public
+COPY docs/design.html ./docs/design.html
 COPY eval ./eval
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
