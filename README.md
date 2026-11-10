@@ -20,12 +20,11 @@ Ranks every link with learned weights, and serves the results through a REST API
 
 ## What it does
 
-| | |
+| Ranks every link | Returns results, not just links |
 |---|---|
-| **Ranks every link** | Weights learned from 5,402 labeled links on 22 public bodies. Every score shows its reasons. |
-| **Returns results, not just links** | Documents with their type and fiscal year. Contacts with name, title, email and phone, each checked against the page. |
-| **Crawls with focus** | The most promising link first, robots.txt, one request at a time per site, so a 300-page budget is spent on the finance pages. |
-| **Shows its work** | A REST API with OpenAPI docs, and a live view of every crawl. |
+| Weights learned from 5,402 labeled links on 22 public bodies. Every score shows its reasons. | Documents with their type and fiscal year. Contacts with name, title, email and phone, each checked against the page. |
+| **Crawls with focus** | **Shows its work** |
+| The most promising link first, robots.txt, one request at a time per site, so a 300-page budget is spent on the finance pages. | A REST API with OpenAPI docs, and a live view of every crawl. |
 
 ## Results
 
@@ -51,15 +50,12 @@ Bozeman's miss is its finance director, listed last name first in a directory ta
 
 ```mermaid
 flowchart LR
-    seed([Start page]) --> queue[(Frontier<br/>best link first)]
-    queue --> fetch[Fetch<br/>robots.txt · one request per site]
-    fetch --> extract[Extract<br/>links · headings · contacts]
-    extract -- new links --> queue
+    seed([Start page]) --> crawl[Crawl<br/>best link first]
+    crawl --> extract[Extract<br/>links · contacts]
+    extract -- new links --> crawl
     extract --> rank{Rank<br/>learned weights}
-    rank -- unsure --> llm[LLM<br/>optional]
-    rank --> store[(Postgres<br/>links · sightings · contacts)]
-    llm --> store
-    store --> api[REST API<br/>and live view]
+    rank --> store[(Postgres)]
+    store --> api[API and<br/>live view]
 ```
 
 - **Two scores per link.** The *target score* says whether the link is the document itself; the
@@ -99,7 +95,7 @@ Interactive docs at `/docs`. [Every endpoint, with real responses →](docs/api.
 
 ## Read more
 
-| | |
+| Read | What is inside |
 |---|---|
 | [How it works](docs/how-it-works.md) | Results, ranking, learned weights, contacts, crawling, data model, tests, limits |
 | [API](docs/api.md) | Every endpoint, with examples and real responses |
