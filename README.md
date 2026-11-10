@@ -26,16 +26,16 @@ One Node process and one Postgres. The crawl queue, the results and the live eve
 the same database, so the whole system starts with `docker compose up`.
 
 ```mermaid
-flowchart LR
-    api[Fastify API<br/>and live view] -->|start a crawl| frontier[(Frontier<br/>Postgres)]
-    frontier -->|claim the best URL| workers[3 async workers<br/>one request per site]
+flowchart TB
+    api[Fastify API and live view] -->|start a crawl| frontier[(Frontier · Postgres)]
+    frontier -->|claim the best URL| workers[3 async workers · one request per site]
     workers -->|new links + path score| frontier
-    workers --> raw[(Raw pages<br/>gzip on disk)]
-    workers --> rank{Rank<br/>learned weights}
-    rank -.->|unsure| llm[LLM<br/>optional]
-    rank --> store[(Postgres<br/>links · sightings · contacts)]
+    workers --> raw[(Raw pages · gzip on disk)]
+    workers --> rank{Rank · learned weights}
+    rank -.->|unsure| llm[LLM · optional]
+    rank --> store[(Postgres · links, sightings, contacts)]
     llm -.-> store
-    store --> api
+    store -->|results| api
 ```
 
 ### Design B · at millions of pages a day
@@ -43,16 +43,17 @@ flowchart LR
 Not built. The same stages, split into pools that scale on their own and talk through queues.
 
 ```mermaid
-flowchart LR
-    sched[Scheduler<br/>recrawl by change rate] --> queue[[Frontier queue<br/>partitioned by host]]
+flowchart TB
+    sched[Scheduler · recrawl by change rate] --> queue[[Frontier queue · partitioned by host]]
     queue --> fetch[Fetcher pool]
     fetch -.->|JS-heavy hosts| browser[Browser pool]
-    fetch --> obj[(Object store<br/>raw pages)]
-    obj --> parse[Parse + rank<br/>learned · vectors · LLM]
+    fetch --> obj[(Object store · raw pages)]
+    obj --> parse[Parse + rank · learned, vectors, LLM]
+    obj --> docs[Documents · OCR, chunks]
     parse -->|unseen links| queue
-    parse --> pg[(Postgres<br/>source of truth)]
-    pg -->|CDC| search[(Search index<br/>keywords + vectors)]
-    obj --> docs[Documents<br/>OCR · chunks] --> search
+    parse --> pg[(Postgres · source of truth)]
+    pg -->|CDC| search[(Search index · keywords + vectors)]
+    docs --> search
     pg --> apiB[API]
     search --> apiB
 ```
@@ -75,12 +76,13 @@ itself: the budget, the ACFR, the finance director's page. The **path score** sa
 leads to one. The crawl follows the path score; the results sort by the target score.
 
 ```mermaid
-flowchart LR
-    link[Link<br/>text · URL · heading · nearby text] --> signals[22 signals]
-    signals --> model{Learned weights<br/>logistic regression}
-    model --> policy[Year and<br/>draft discounts]
-    policy --> score([Target score<br/>+ reasons])
-    policy -.->|0.2 to 0.7, LLM on| llm[LLM decides] -.-> score
+flowchart TB
+    link[Link: text, URL, heading, nearby text] --> signals[22 signals]
+    signals --> model{Learned weights · logistic regression}
+    model --> policy[Year and draft discounts]
+    policy --> score([Target score + reasons])
+    policy -.->|0.2 to 0.7, LLM on| llm[LLM decides]
+    llm -.-> score
 ```
 
 A real result from Ann Arbor, with the reasons the API returns:
