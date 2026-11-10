@@ -190,9 +190,9 @@ h3[id] { scroll-margin-top: 24px; }
     <ol>
       <li><a href="#summary">Summary</a></li>
       <li><a href="#brief">What the brief asks</a></li>
-      <li><a href="#targets">What we look for</a></li>
+      <li><a href="#targets">What the crawler looks for</a></li>
     </ol>
-    <p class="toc-group">Design A · We build</p>
+    <p class="toc-group">Design A · Built</p>
     <ol>
       <li><a href="#scope">Scope and order</a></li>
       <li><a href="#build">Build steps</a></li>
@@ -229,7 +229,7 @@ h3[id] { scroll-margin-top: 24px; }
       <p class="eyebrow">Pursuit take-home · System design</p>
       <h1>High-Value Link Scraper</h1>
       <p class="lede">A scraper that reads a public entity's web pages and ranks every link by how likely it is to lead to a budget, an annual financial report or a finance contact. It pulls out the contacts and files themselves, ranks cheaply first and with an LLM only when needed, stores every result with the page it came from, and serves the data through a small, well-shaped API that also shows a crawl live.</p>
-      <p class="meta">Igal Babushkin · Draft 4, as built · November 9, 2026 · <a href="https://github.com/igalk1515/high-value-link-scraper">github.com/igalk1515/high-value-link-scraper</a></p>
+      <p class="meta">Igal Babushkin · As built · November 9, 2026 · <a href="https://github.com/igalk1515/high-value-link-scraper">github.com/igalk1515/high-value-link-scraper</a></p>
     </header>
 
     <section id="summary" aria-labelledby="h-summary">
@@ -280,7 +280,7 @@ h3[id] { scroll-margin-top: 24px; }
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>#</th><th>The brief asks for</th><th>Our answer</th><th>Where</th></tr></thead>
+          <thead><tr><th>#</th><th>The brief asks for</th><th>Answer</th><th>Where</th></tr></thead>
           <tbody>
             <tr><td class="num">1</td><td>High-value links on a page, focused on contacts and specific files, ranked by an intelligent approach</td><td>Rules score every link. An LLM decides the unclear ones. Contacts and files come out as their own results, not only as links.</td><td><a href="#ranking">Ranking</a>, <a href="#contacts">Contacts and files</a></td></tr>
             <tr><td class="num">2</td><td>Adjustable keyword prioritization, such as "Budget", "ACFR" and "Finance Director"</td><td>Each crawl takes its own keywords, weights and synonyms.</td><td><a href="#keywords">Keywords</a></td></tr>
@@ -295,7 +295,7 @@ h3[id] { scroll-margin-top: 24px; }
     </section>
 
     <section id="targets" aria-labelledby="h-targets">
-      <h2 id="h-targets">What we look for</h2>
+      <h2 id="h-targets">What the crawler looks for</h2>
       <p>Before any code, these are the targets on the four test sites, found by hand on November 7, 2026. They become the must-find list the crawler is measured against.</p>
       <div class="table-wrap">
         <table>
@@ -377,7 +377,7 @@ h3[id] { scroll-margin-top: 24px; }
 
     <div class="part" id="design-a">
       <p class="part-k">Design A</p>
-      <h2 class="part-h">What we build</h2>
+      <h2 class="part-h">What I built</h2>
       <p>One machine, one process, one Postgres. Everything in this part is planned for the take-home code and built in the order of the tables below. Items marked Could, or "if time", were left for the last step, and each one says whether it was built.</p>
     </div>
 
@@ -393,7 +393,7 @@ h3[id] { scroll-margin-top: 24px; }
             <tr><td><span class="pill must">Must</span></td><td>Postgres schema built for volume, plus the API with OpenAPI docs</td><td>The brief asks for storage at scale and a well-built API. One page analyzed end to end is the first milestone.</td></tr>
             <tr><td><span class="pill must">Must</span></td><td>A simple focused crawler: robots.txt, one request at a time per host, URL normalization, seen check, trap guards, best link first, depth 3, page budget</td><td>The targets on the test sites are two to four clicks from home.</td></tr>
             <tr><td><span class="pill must">Must</span></td><td>README with setup, ranking approach and API guide</td><td>Required by the brief.</td></tr>
-            <tr><td><span class="pill should">Should</span></td><td>Live view: an event stream and a watch page</td><td>Makes a crawl easy to follow, and it is our main tool for checking each step while building.</td></tr>
+            <tr><td><span class="pill should">Should</span></td><td>Live view: an event stream and a watch page</td><td>Makes a crawl easy to follow, and it was my main tool for checking each step while building.</td></tr>
             <tr><td><span class="pill should">Should</span></td><td>Evaluation: must-find recall and precision@10 per site</td><td>Turns "it looks right" into a number that can catch regressions.</td></tr>
             <tr><td><span class="pill could">Could</span></td><td>Browser render for script-built pages: <strong>built</strong>, off by default. A few workers in one process: <strong>built</strong>, 3 by default. The text layer of vague PDF links: <strong>not built</strong>.</td><td>Script-built pages are flagged <code>needs_browser</code>. With the render tier on, the ones on the entity's own site are opened in a headless browser. JSON embedded in the page is read without a browser.</td></tr>
             <tr><td><span class="pill design">Design B</span></td><td>Distributed frontier, worker pools, object store, Bloom filter, recrawl scheduler, embeddings and hybrid search, search index, OCR, distilled classifier</td><td>Matters at millions of pages a day, and adds little to a demo on four sites.</td></tr>
@@ -413,12 +413,12 @@ h3[id] { scroll-margin-top: 24px; }
 
     <section id="build" aria-labelledby="h-build">
       <h2 id="h-build">Build steps</h2>
-      <p>Each step is small and ends with a check that we run and read before moving on. Steps 0 to 12 are built, and step 13 in part. What each check printed is in <code>docs/build-log.md</code> in the repository.</p>
+      <p>Each step is small and ends with a check that I ran and read before moving on. Steps 0 to 12 are built, and step 13 in part. What each check printed is in <code>docs/build-log.md</code> in the repository.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Step</th><th>What we build</th><th>How we verify it</th></tr></thead>
+          <thead><tr><th>Step</th><th>What is built</th><th>How it is verified</th></tr></thead>
           <tbody>
-            <tr><td class="num">0</td><td>Must-find list for the four sites, and the test set</td><td>Every link in "What we look for" and "Test set" behaves the way the table says.</td></tr>
+            <tr><td class="num">0</td><td>Must-find list for the four sites, and the test set</td><td>Every link in "What the crawler looks for" and "Test set" behaves the way the table says.</td></tr>
             <tr><td class="num">1</td><td>Project skeleton: docker compose, Postgres, migrations</td><td><code>docker compose up</code>, then <code>\dt</code> lists every table.</td></tr>
             <tr><td class="num">2</td><td>Fetch one URL politely: robots.txt per RFC 9309, timeouts, size cap, redirects, status handling</td><td>Unit tests built from the RFC's examples pass. A CLI prints the robots decision, status, final URL, size and time for each test site's home page. Bozeman showed as blocked with the crawler's own User-Agent.</td></tr>
             <tr><td class="num">3</td><td>Extract links with anchor, heading and nearby text</td><td>On Ann Arbor's Financial Reporting page, "Fiscal Year 2025" comes out with the heading "Annual Comprehensive Financial Report (ACFR)".</td></tr>
@@ -439,7 +439,7 @@ h3[id] { scroll-margin-top: 24px; }
 
     <section id="testset" aria-labelledby="h-testset">
       <h2 id="h-testset">Test set</h2>
-      <p>Seventeen real cases, each one a problem the crawler has to handle. Every case was checked with a plain request on November 7, 2026. Cases marked 13 were left for the last step and are still not solved: the link is ranked from its anchor and heading, and a page drawn by scripts is flagged <code>needs_browser</code>. The render tier built in step 13 opens only pages on the entity's own site. Each case gets a saved snapshot of the HTML or headers, so tests run offline and give the same result every time. Before submitting, we also run one live check per case by hand.</p>
+      <p>Seventeen real cases, each one a problem the crawler has to handle. Every case was checked with a plain request on November 7, 2026. Cases marked 13 were left for the last step and are still not solved: the link is ranked from its anchor and heading, and a page drawn by scripts is flagged <code>needs_browser</code>. The render tier built in step 13 opens only pages on the entity's own site. Each case gets a saved snapshot of the HTML or headers, so tests run offline and give the same result every time. Any case can also be checked live with <code>npm run fetch-one -- &lt;url&gt;</code>.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Case</th><th>Example</th><th>What a plain request returned</th><th>What the crawler must do</th><th>Step</th></tr></thead>
@@ -1105,7 +1105,7 @@ create index on crawl_events (crawl_id, id);</code></pre>
 
     <section id="live" aria-labelledby="h-live">
       <h2 id="h-live">Live view</h2>
-      <p>A crawl can run for minutes, so it should be easy to watch while it runs. The same view is our main tool for checking each build step: we see what the crawler does and why, instead of reading logs after the fact.</p>
+      <p>A crawl can run for minutes, so it should be easy to watch while it runs. The same view was my main tool for checking each build step: it shows what the crawler does and why, instead of reading logs after the fact.</p>
       <p class="pre-label">GET /live/{id} · sketch</p>
 <pre><code>┌ Crawl a2gov.org ──────────────────────── running · 2m 14s ┐
 │ Now    /departments/finance/        depth 2 · path 0.80   │
@@ -1179,7 +1179,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
       <p>The stages stay the same. Each row shows what changes.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Part</th><th>Design A · we build</th><th>Design B · ambitious</th></tr></thead>
+          <thead><tr><th>Part</th><th>Design A · built</th><th>Design B · ambitious</th></tr></thead>
           <tbody>
             <tr><td>Frontier</td><td>Postgres table, walked best-first by one process with 3 async workers, which claim with SKIP LOCKED.</td><td>Kafka or SQS, partitioned by host hash, fed by a recrawl scheduler</td></tr>
             <tr><td>Seen set</td><td>Postgres unique key on the URL hash</td><td>Bloom filter in Redis, with the Postgres key as the final word</td></tr>
