@@ -185,11 +185,21 @@ changed.
 
 ## Sites that block automated requests
 
-Bozeman answers 403 to every automated request, including robots.txt. At this scale some
-percentage of sites will behave the same way. Spoofing a browser to get past that is evasion and
-a reputation risk, so the crawler reports the block instead. These are the fixes that scale:
+Bozeman refused the crawler's original custom User-Agent with a 403, robots.txt included. At this
+scale some share of sites will refuse requests the same way. The crawler handles this through its
+request identity, with no per-site workarounds:
 
-- an identified bot with a contact page that site owners can allow;
+- **Default identity:** a desktop Chrome User-Agent (`HTTP_USER_AGENT`), which Bozeman accepts.
+  robots.txt rules are matched against its leading product token.
+- **403 fallback:** one retry with Node's standard User-Agent, at least a second later. The
+  identity that worked is remembered per origin.
+- **robots.txt:** respected by default, and switchable per crawl (`respect_robots`).
+
+A site that also refuses the standard client is reported as blocked. At millions of pages a day,
+these are the next steps:
+
+- the header is one setting, so moving to an identified bot with a contact page that site owners
+  can allow, if Pursuit prefers that, needs no code change;
 - asking the large platforms for access;
 - other sources for the same documents. For example, entities that issue bonds post their ACFRs
   to MSRB's EMMA as continuing disclosures.
