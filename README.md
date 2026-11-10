@@ -25,13 +25,13 @@ Ranks every link with learned weights, and serves the results through a REST API
 One Node process and one Postgres. The crawl queue, the results and the live events all live in
 the same database, so the whole system starts with `docker compose up`.
 
-<img src="docs/images/design-a.png" alt="Design A: the API starts a crawl; workers take the best URL from a Postgres frontier, one request per site, and save raw pages; every page is ranked with learned weights, the LLM only when unsure, and stored in Postgres" width="100%">
+<img src="docs/images/design-a.png" alt="Design A: the API sends seed URLs through a seen check into a frontier table in Postgres; the fetcher takes the next URL, one request per host, and saves raw pages; extract and rank sends new links with a path score back through the seen check, unclear items to OpenAI, and results to Postgres" width="100%">
 
 ### Design B · at millions of pages a day
 
 Not built. The same stages, split into pools that scale on their own and talk through queues.
 
-<img src="docs/images/design-b.png" alt="Design B: a scheduler feeds a frontier queue partitioned by host; a fetcher pool and a browser pool write raw pages to an object store; parse and rank workers write to Postgres, which feeds a search index through CDC, alongside a document pipeline" width="100%">
+<img src="docs/images/design-b.png" alt="Design B: a scheduler feeds a frontier queue partitioned by host; a fetcher pool and a browser pool write raw pages to an object store; parse and rank workers send unseen links back through a Bloom filter, unsure links to the LLM API, and results to Postgres, which feeds a search index through CDC; a document pipeline indexes PDF chunks" width="100%">
 
 | | Design A · built | Design B · at scale |
 |---|---|---|
@@ -50,7 +50,7 @@ Every link gets **two scores**. The **target score** says whether the link is th
 itself: the budget, the ACFR, the finance director's page. The **path score** says whether it
 leads to one. The crawl follows the path score; the results sort by the target score.
 
-<img src="docs/images/link-logic.png" alt="A link's text, URL, heading and nearby text become 22 signals; learned weights give a probability; year and draft discounts follow; the LLM decides only scores between 0.2 and 0.7" width="100%">
+<img src="docs/images/ranking.png" alt="Ranking cascade: extracted links go to tier 1, the learned weights; links at 0.7 or more, or 0.2 or less, are decided there; links in between go to the LLM, which always decides; embeddings are a later tier between them" width="100%">
 
 A real result from Ann Arbor, with the reasons the API returns:
 

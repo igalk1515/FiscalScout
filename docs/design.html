@@ -770,7 +770,7 @@ returning f.url, f.host;
 
       <figure>
         <div class="dg">
-          <svg viewBox="0 0 900 226" role="img" aria-label="Ranking cascade. Every extracted link goes to tier 1, rules. Links scoring at least 0.7 or at most 0.2 are decided there. In the first version, links between 0.2 and 0.7 go straight to tier 3, a batched LLM call, which always decides. Tier 2, embeddings, is a later step that would sit between them. Every decision is stored with its scores, reason and deciding tier.">
+          <svg viewBox="0 0 900 226" role="img" aria-label="Ranking cascade. Every extracted link goes to tier 1, learned weights over the rule signals. Links scoring at least 0.7 or at most 0.2 are decided there. In the first version, links between 0.2 and 0.7 go straight to tier 3, a batched LLM call, which always decides. Tier 2, embeddings, is a later step that would sit between them. Every decision is stored with its scores, reason and deciding tier.">
             <defs>
               <marker id="d2-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 z"/></marker>
               <marker id="d2-mc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk cost" d="M0 0 L10 5 L0 10 z"/></marker>
@@ -783,7 +783,7 @@ returning f.url, f.host;
             <text class="s" x="85" y="195" text-anchor="middle">anchor · URL · context</text>
 
             <rect class="box" x="200" y="150" width="180" height="62" rx="6"/>
-            <text class="t" x="290" y="176" text-anchor="middle">1 · Rules</text>
+            <text class="t" x="290" y="176" text-anchor="middle">1 · Learned weights</text>
             <text class="s" x="290" y="195" text-anchor="middle">free · runs on every link</text>
 
             <rect class="box ghost" x="455" y="150" width="180" height="62" rx="6"/>
@@ -808,7 +808,7 @@ returning f.url, f.host;
             <text class="lbl cost" x="808" y="108">always decides</text>
           </svg>
         </div>
-        <figcaption>Each link stops at the cheapest tier that can decide it. In the first version the dashed tier is skipped and unclear links go straight from the rules to the LLM. The 0.7 and 0.2 thresholds are starting values, tuned on the labeled set.</figcaption>
+        <figcaption>Each link stops at the cheapest tier that can decide it. In the first version the dashed tier is skipped and unclear links go straight from tier 1 to the LLM. The 0.7 and 0.2 thresholds are starting values, tuned on the labeled set.</figcaption>
       </figure>
 
       <h3>Tier 1: rule signals</h3>
@@ -1252,7 +1252,7 @@ data: {"url":"https://www.a2gov.org/calendar/2031-01","reason":"trap"}</code></p
 
             <rect class="box accent" x="640" y="250" width="150" height="60" rx="6"/>
             <text class="t" x="715" y="276" text-anchor="middle">Parse + rank</text>
-            <text class="s" x="715" y="294" text-anchor="middle">rules → vectors → LLM</text>
+            <text class="s" x="715" y="294" text-anchor="middle">learned → vectors → LLM</text>
 
             <rect class="box cost" x="850" y="250" width="150" height="60" rx="6"/>
             <text class="t" x="925" y="276" text-anchor="middle">LLM API</text>
