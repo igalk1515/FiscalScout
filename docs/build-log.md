@@ -431,8 +431,3 @@ Melissa", last name first, and no email. The contact extractor does not read tha
 **A weakness of the learned ranker showed here.** It puts the FY2027 recommended budget third,
 behind the capital improvement plan and the FY2024 budget. It reads "Recommended" and "Biennium"
 as extra words in the link text, the same feature that pushes down "Budget Impact Analysis".
-
-## Not done
-
-- **GitHub:** creating the public repository was refused by the permission system on this
-  machine, so the code is committed locally only.

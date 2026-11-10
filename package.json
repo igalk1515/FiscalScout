@@ -1,5 +1,5 @@
 {
-  "name": "high-value-link-scraper",
+  "name": "fiscalscout",
   "version": "0.1.0",
   "description": "Finds and ranks high-value links, finance contacts and documents on public-sector websites, with an API and a live crawl view.",
   "type": "module",

@@ -1,8 +1,8 @@
-# High-Value Link Scraper
+# FiscalScout
 
-Finds the links on a public entity's website that lead to **budgets, annual financial reports
-(ACFR) and finance contacts**, ranks them, and serves them through an API, with a live view of
-every crawl.
+**A high-value link scraper with an API.** Finds the links on a public entity's website that
+lead to **budgets, annual financial reports (ACFR) and finance contacts**, ranks them, and serves
+them through an API, with a live view of every crawl.
 
 - **Ranks every link** with weights learned from 5,402 labeled links on 22 public bodies
   (logistic regression over the rule signals), and keywords you set per crawl. The hand-set
@@ -18,6 +18,8 @@ every crawl.
 - **REST API** with OpenAPI docs, keyset pagination and one error shape, plus a
   Server-Sent Events stream and a watch page that shows each crawl live.
 
+- **Live demo:** https://scraper.igal-web.com, with the LLM off. The architecture page is at
+  https://scraper.igal-web.com/architecture.
 - **Running it at millions of pages a day:** [docs/scaling.md](docs/scaling.md), with numbers
   measured on the test crawls and what would break first.
 - **How each build step was checked, and what the real sites taught:** [docs/build-log.md](docs/build-log.md).
@@ -146,6 +148,8 @@ You need Docker. Node 20.12 or newer (22 recommended) is only needed to run outs
 ### Everything in Docker
 
 ```bash
+git clone https://github.com/igalk1515/FiscalScout.git
+cd FiscalScout
 docker compose up --build
 ```
 

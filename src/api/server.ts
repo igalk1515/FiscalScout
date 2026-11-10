@@ -20,7 +20,7 @@ export async function buildServer(ctx: AppContext) {
   await app.register(swagger, {
     openapi: {
       info: {
-        title: "High-Value Link Scraper API",
+        title: "FiscalScout API",
         version: "1.0.0",
         description:
           "Start crawls of public-sector websites, follow them live, and read the ranked links, documents and finance contacts they found.",
