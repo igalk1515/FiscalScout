@@ -377,7 +377,7 @@ raw pages are gzip files on disk keyed by URL hash, outside the database.
 
 ## Tests
 
-`npm test` runs 173 tests:
+`npm test` runs 176 tests:
 
 - **Unit:** URL normalization and scope, trap guards, the RFC 9309 examples, the fetcher (redirects,
   loops, size cap, timeouts, retry rules), keyword matching, fiscal years, rules scoring and

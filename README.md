@@ -11,7 +11,7 @@ Ranks every link with learned weights, and serves the results through a REST API
 ![Node](https://img.shields.io/badge/Node-22-5FA04E?logo=nodedotjs&logoColor=white)
 ![Fastify](https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-173%20passing-2EA44F)
+![Tests](https://img.shields.io/badge/tests-176%20passing-2EA44F)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 </div>
